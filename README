@@ -1,0 +1,37 @@
+#################################################################
+Ubisoft GameService DC Server
+Author Shuouma
+2017
+#################################################################
+Description
+#################################################################
+This is the source code release of the Ubisoft GameService server.
+It is a proof-of-concept server, that is, this is not
+a production release. So take it as it is.
+
+#################################################################
+Prerequisite & Limitations
+#################################################################
+1. Libraries for sqlite3 (libsqlite3) and pthread are required for compilation
+2. It is mandatory to edit all the cfg files and replace both IP and Port depending on setup.
+3. You need a working IRCD software running, usually on port 6667, can be configured from the cfg files.
+4. The code is only tested on a Little-endian (byte-order) and X86_64 architecture. Will probably not
+   work on big-endian without smaller modifications of the code.
+5. The release is for Linux
+
+#################################################################
+Compile & Run
+#################################################################
+
+1. make (to compile the source code)
+2. Execute the binaries:
+gs_router (HTTP and Router module)
+gs_lobby (Wait and Lobby Module)
+gs_gameserver (Game Server Module)
+
+Note:
+Create your own script for easier launch. Pipe the log to file.
+Small launch script included in init.d
+
+Best Regards
+Shuouma
