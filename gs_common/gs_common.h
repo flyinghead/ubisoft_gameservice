@@ -7,7 +7,7 @@
 #define SIM_LAP_MODE 1
 #define ARCADE_LAP_MODE 2
 
-#define MAX_PKT_SIZE 1024
+#define MAX_PKT_SIZE 1100
 #define MAX_UNAME_LEN 17
 
 #define POD_SERVER 1
@@ -43,9 +43,20 @@
 #define LOGINSESSION 0x5E
 #define DISCONNECTSESSION 0x5F
 #define STARTGAME 0x63
+#define PRICESLIST 0x65
 #define LOGIN 0x66
 #define LOGINARENA 0x68
+#define DBINFOPLAYERDATA 0x6B
+#define GAMEDEFINES 0x6F
+#define DBINFOFULLSTATS 0x75
+#define DBUPDATEFULLSTATS 0x76
+#define STATS_POINT 0x78	// TODO
+#define STATS_CASH 0x79		// TODO
+#define STATS_STANDARDAVG 0x7A	// TODO
+#define STATS_STANDARDWIN 0x7B	// TODO...
+#define REQUESTMOTD 0x8C
 #define ARENANEW 0x8D
+#define VERSIONCHECK 0x8E
 #define NEWBASICGROUP 0x8F
 #define ARENAREMOVED 0x90
 #define DELETEBASICGROUP 0x91
@@ -56,6 +67,7 @@
 #define UNKNOWN 0xB6
 #define WAKEUP 0xB4
 #define SLEEP 0xB3
+#define FINDSUITABLEGROUP 0xB6
 #define CUSTOM_DC_STAT 0x98
 
 void gs_error(const char* format, ... );

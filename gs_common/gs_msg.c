@@ -333,7 +333,7 @@ uint16_t create_getsession(char* msg, char* username, char* name, char* game, ch
 }
 
 //IrcAlias, acc.Username, acc.FirstName, acc.LastName, acc.Language, acc.Email, acc.PublicIP
-uint16_t create_playerinfo(char* msg, char* username, char* ip) {
+uint16_t create_playerinfo(char* msg, char* username, char* ip, char extended) {
   int pkt_size = 0;
 
   pkt_size += bin8_to_msg('\x13', &msg[pkt_size]);
@@ -354,23 +354,23 @@ uint16_t create_playerinfo(char* msg, char* username, char* ip) {
   pkt_size += sprintf(&msg[pkt_size], "s%s", ip);
   pkt_size++;
   
-  /* TEST SDO - is needed
+  if (extended)
+  {
+    /* TEST SDO - is needed */
+    //Sex
+    pkt_size += bin32_to_msg((uint32_t)1, &msg[pkt_size]);
 
-  //Sex
-  pkt_size += bin32_to_msg((uint32_t)1, &msg[pkt_size]);
-
-  //Photo
-  pkt_size += bin32_to_msg((uint32_t)1, &msg[pkt_size]);
-
-  //Game
-  pkt_size += sprintf(&msg[pkt_size], "s%s", "");
-  pkt_size++;
+    //Photo
+    pkt_size += bin32_to_msg((uint32_t)1, &msg[pkt_size]);
   
-  //Webpage
-  pkt_size += sprintf(&msg[pkt_size], "s%s", "");
-  pkt_size++;
-  
-  */
+    //Game
+    pkt_size += sprintf(&msg[pkt_size], "s%s", "");
+    pkt_size++;
+
+    //Webpage
+    pkt_size += sprintf(&msg[pkt_size], "s%s", "");
+    pkt_size++;
+  }
 
   pkt_size += sprintf(&msg[pkt_size], "%s", "]");
   

@@ -7,7 +7,7 @@
 
 uint16_t create_gs_hdr(char* msg, uint8_t msg_id, uint8_t msg_flag, uint16_t msg_size);
 uint16_t create_joinwaitmodule(char* msg, char* ip, uint16_t port);
-uint16_t create_playerinfo(char* msg, char* username, char* ip);
+uint16_t create_playerinfo(char* msg, char* username, char* ip, char extended);
 uint16_t create_updategroupsize(char* msg, uint32_t groupid, uint32_t nr_players);
 uint16_t create_loginarena(char* msg, uint32_t arena_id);
 uint16_t create_joinarena(char* msg, uint32_t arena_id, uint16_t port);

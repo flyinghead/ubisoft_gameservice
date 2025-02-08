@@ -362,7 +362,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	return 0;
       }
       
-      pkt_size = create_playerinfo(&msg[6], pl->username, ip);
+      pkt_size = create_playerinfo(&msg[6], pl->username, ip, s->server_type == SDO_SERVER);
       pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);      
       send_gs_msg(sock, msg, pkt_size);
       
@@ -388,7 +388,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	  return 0;
 	}
 	/* OK */
-	pkt_size = create_playerinfo(&msg[6], pl_lookup->username, ip);
+	pkt_size = create_playerinfo(&msg[6], pl_lookup->username, ip, s->server_type == SDO_SERVER);
 	pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
 	send_gs_msg(sock, msg, pkt_size);
       } else {

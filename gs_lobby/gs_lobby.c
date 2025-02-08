@@ -586,36 +586,43 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     return 0;
   }
 
-  //Jump the header
-  pos = pos + 6;
-  while (pos < recv_size) {
-    if (nr_s_parsed == 256 || nr_b_parsed == 256) {
-      return 0;
-    }
-    switch (buf[pos]) {
-    case 's':
-      pos++;
-      tok_array[nr_s_parsed] = &buf[pos];
-      pos += (int)(strlen(tok_array[nr_s_parsed]));
-      nr_s_parsed++;
-      break;;
-    case 'b':
-      pos++;
-      if (pos + 4 > buf_len) {
-	gs_error("Binary data exceeds buffer %d > %d on nr %d", (pos+4), buf_len, nr_b_parsed);
-	  return 0;
+  if (recv_flag != DBUPDATEFULLSTATS && recv_flag != STATS_POINT 	// TODO
+		  && recv_flag != STATS_CASH && recv_flag != STATS_STANDARDAVG
+		  && recv_flag != STATS_STANDARDWIN)
+  {
+    //Jump the header
+    pos = pos + 6;
+    while (pos < recv_size) {
+      if (nr_s_parsed == 256 || nr_b_parsed == 256) {
+	return 0;
       }
-      binLen = char_to_uint32(&buf[pos]);
-      if ((uint32_t)(pos + 4) + binLen > buf_len) {
-	gs_error("Binary data exceeds buffer %d > %d on nr %d", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed);
-	  return 0;
+      switch (buf[pos]) {
+      case 's':
+	pos++;
+	tok_array[nr_s_parsed] = &buf[pos];
+	pos += (int)(strlen(tok_array[nr_s_parsed]));
+	nr_s_parsed++;
+	break;;
+      case 'b':
+	pos++;
+	if (pos + 4 > buf_len) {
+	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
+	  print_gs_data(buf, (long unsigned int)buf_len);
+	    return 0;
+	}
+	binLen = char_to_uint32(&buf[pos]);
+	if ((uint32_t)(pos + 4) + binLen > buf_len) {
+	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
+	  print_gs_data(buf, (long unsigned int)buf_len);
+	    return 0;
+	}
+	memcpy(&byte_array[nr_b_parsed], &buf[pos+4], binLen);
+	nr_b_parsed++;
+	break;;
+      default:
+	pos++;
+	break;;
       }
-      memcpy(&byte_array[nr_b_parsed], &buf[pos+4], binLen);
-      nr_b_parsed++;
-      break;;
-    default:
-      pos++;
-      break;;
     }
   }
 
@@ -641,9 +648,11 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d values from JOINSESSION packet needs 2", nr_b_parsed);
       return 0;
     }
-
     groupid = byte_array[0];
     sess = find_server_session(s, groupid);
+    gs_info("JOINSESSION %s %s groupid=%d %d session=%p", tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
+    print_gs_data(buf, (long unsigned int)buf_len);
+
 
     /* Joining a session */
     if (sess != NULL) {
@@ -948,6 +957,19 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     if (pl->username != NULL)
       gs_info("%s disconnected from session", pl->username);
     break;;
+  case FINDSUITABLEGROUP:
+    // string SDODC_GARAGE
+    // [ binary:00 00 00 04, 01 00 00]
+    {
+      pkt_size = (uint16_t)sprintf(&msg[6], "s%s", tok_array[0]);
+      pkt_size++;
+      //pkt_size += bin8_to_msg(ping, &msg[pkt_size]);
+      //pkt_size++;
+      //pkt_size += bin32_to_msg(group, &msg[pkt_size]);
+
+      pkt_size = create_gs_hdr(msg, FINDSUITABLEGROUP, 0x24, pkt_size);
+    }
+    break;
   default:
     gs_info("Flag not supported %x", recv_flag);
     print_gs_data(buf, (long unsigned int)buf_len);
@@ -1067,6 +1089,28 @@ void *gs_server_handler(void* data) {
 			    0)) {
       free(sess);
       gs_error("Could not create POD Chat session");
+      return 0;
+    }
+  }
+  else if (s_data->server_type == SDO_SERVER) {	// FIXME test
+    session_t *sess = (session_t *)malloc(sizeof(session_t));
+    if (!add_server_session(s_data,
+			    sess,
+			    NULL,
+			    "Whatever",
+			    s_data->game,
+			    "1.0",
+			    "Whatever info",
+			    "",
+			    0,
+			    s_data->max_players,
+			    s_data->max_players,
+			    s_data->chatgroup_id,
+			    s_data->arena_id,
+			    0,
+			    0)) {
+      free(sess);
+      gs_error("Could not create SDO Whatever session");
       return 0;
     }
   }
