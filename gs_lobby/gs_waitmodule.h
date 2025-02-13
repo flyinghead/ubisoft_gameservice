@@ -24,7 +24,7 @@ typedef struct {
   char session_name[MAX_UNAME_LEN];
   char session_game[MAX_UNAME_LEN];
   char session_gameversion[MAX_UNAME_LEN];
-  char session_gameinfo[MAX_UNAME_LEN];
+  char session_gameinfo[32];
   char session_password[MAX_UNAME_LEN];
   char session_master[MAX_UNAME_LEN];
   uint32_t session_master_player_id;
@@ -48,6 +48,7 @@ typedef struct {
   char server_ip[INET_ADDRSTRLEN];
   char server_db_path[256];
 
+  char name[MAX_UNAME_LEN];
   char game[MAX_UNAME_LEN];
   char allowedbranch[256];
   

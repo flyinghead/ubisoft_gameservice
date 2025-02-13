@@ -16,7 +16,7 @@ uint16_t create_createsession(char* msg, char* session_name, uint32_t session_id
 uint16_t create_playerpoints(char* msg, char* username, uint32_t points, uint32_t trophies, char* game);
 uint16_t create_gssuccessful(char* msg, uint8_t msg_code);
 uint16_t create_gsfail(char* msg, uint8_t msg_code, uint32_t error_code);
-uint16_t create_new_basic_group(char* msg, uint32_t arena_id, uint32_t basicgroup_id, char* game, char* allowedbranch);
+uint16_t create_new_basic_group(char* msg, char *name, uint32_t arena_id, uint32_t basicgroup_id, char* game, char* allowedbranch);
 uint16_t create_new_arena(char* msg, uint32_t arena_id, uint32_t basicgroup_id, char* ip);
 uint16_t create_getsession(char* msg, char* username, char* name, char* game,char* gameinfo, char* master, uint32_t session_id, uint32_t group_id, uint32_t max_players, uint32_t max_observers, uint32_t conf);
 uint16_t create_sessionnew(char* msg, char* name, char* game, char* allowedbranch, char* gameinfo, char* master, uint32_t session_id, uint32_t group_id, uint32_t nb_of_players, uint32_t max_players, uint32_t max_observers, uint32_t config);

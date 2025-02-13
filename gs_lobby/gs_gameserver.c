@@ -547,26 +547,26 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       print_gs_data(buf, (long unsigned int)buf_len);
       break;;
       
-    case VERSIONCHECK:
+    case SDO_VERSION_CHECK:
       gs_info("Got VERSION_CHECK");
       print_gs_data(buf, (long unsigned int)buf_len);
       msg[8] = 1;	// OK
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)VERSIONCHECK, SENDTOPLAYER, 1);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_VERSION_CHECK, SENDTOPLAYER, 1);
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;
 
-    case PRICESLIST:
+    case SDO_PRICES_LIST:
       gs_info("Got PRICES_LIST");
       print_gs_data(buf, (long unsigned int)buf_len);
       pkt_size = (uint16_t)uint32_to_char(0, &msg[8]);	// list size
       // TODO add items to the list?
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)PRICESLIST, SENDTOPLAYER, pkt_size);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PRICES_LIST, SENDTOPLAYER, pkt_size);
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;
 
-    case GAMEDEFINES:
+    case SDO_GAME_DEFINES:
       gs_info("Got GAME_DEFINES");
       print_gs_data(buf, (long unsigned int)buf_len);
       // TODO
@@ -577,12 +577,12 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     	  int v = 1;
     	  pkt_size += (uint16_t)uint32_to_char(v, &msg[8 + pkt_size]);
       }
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)GAMEDEFINES, SENDTOPLAYER, pkt_size);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GAME_DEFINES, SENDTOPLAYER, pkt_size);
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;
 
-    case DBINFOPLAYERDATA:
+    case SDO_DBINFO_PLAYERDATA:
       gs_info("Got DBINFO_PLAYERDATA");
       print_gs_data(buf, (long unsigned int)buf_len);
       // 6 ints
@@ -597,31 +597,31 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     	  memset(&msg[8 + pkt_size], 0, 101);
     	  pkt_size += 101;
       }
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)DBINFOPLAYERDATA, SENDTOPLAYER, pkt_size);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_PLAYERDATA, SENDTOPLAYER, pkt_size);
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;
 
-    case DBINFOFULLSTATS:
+    case SDO_DBINFO_FULLSTATS:
       gs_info("Got DBINFO_FULLSTATS");
       print_gs_data(buf, (long unsigned int)buf_len);
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)DBINFOFULLSTATS, SENDTOPLAYER, 0);	// empty for now
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_FULLSTATS, SENDTOPLAYER, 0);	// empty for now
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;
-    case DBUPDATEFULLSTATS:
+    case SDO_DBUPDATE_FULLSTATS:
       gs_info("Got DBINFO_FULLSTATS");
       print_gs_data(buf, (long unsigned int)buf_len);
       // TODO
       pkt_size = 0;
       break;
 
-    case REQUESTMOTD:
+    case SDO_REQUEST_MOTD:
       gs_info("Got REQUEST_MOTD");
       print_gs_data(buf, (long unsigned int)buf_len);
       strcpy(&msg[8], "Welcome to DCNet Speed Devils server!");
       pkt_size = strlen("Welcome to DCNet Speed Devils server!") + 1;
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)REQUESTMOTD, SENDTOPLAYER, pkt_size);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_REQUEST_MOTD, SENDTOPLAYER, pkt_size);
       write(pl->sock, msg, pkt_size);
       pkt_size = 0;
       break;

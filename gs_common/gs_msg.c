@@ -75,7 +75,7 @@ uint16_t create_updatesessions(char* msg, uint32_t groupid, uint32_t session_con
 //Group_id
 uint16_t create_begingame(char* msg, uint32_t groupid) {
   int pkt_size = 0;
-  pkt_size += bin8_to_msg('\x28', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(BEGINGAME, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "%s", "[");
   pkt_size += bin32_to_msg(groupid, &msg[pkt_size]); 
@@ -86,7 +86,7 @@ uint16_t create_begingame(char* msg, uint32_t groupid) {
 //Group_id
 uint16_t create_joinsession(char* msg, uint32_t groupid) {
   int pkt_size = 0;
-  pkt_size += bin8_to_msg('\x1c', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(JOINSESSION, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "%s", "[");
   pkt_size += bin32_to_msg(groupid, &msg[pkt_size]); 
@@ -97,7 +97,7 @@ uint16_t create_joinsession(char* msg, uint32_t groupid) {
 //Arena id
 uint16_t create_loginarena(char* msg, uint32_t arena_id) {
   int pkt_size = 0;
-  pkt_size += bin8_to_msg('\x68', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(LOGINARENA, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "%s", "[");
   pkt_size += bin32_to_msg(arena_id, &msg[pkt_size]);
@@ -127,7 +127,7 @@ uint16_t create_gsfail(char* msg, uint8_t msg_code, uint32_t error_code) {
 
 uint16_t create_joinwaitmodule(char* msg, char* ip, uint16_t port) {
   int pkt_size = 0;
-  pkt_size += bin8_to_msg('\x5d', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(JOINWAITMODULE, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "[s%s", ip);
   pkt_size++;
@@ -141,7 +141,7 @@ uint16_t create_joinwaitmodule(char* msg, char* ip, uint16_t port) {
 uint16_t create_joinarena(char* msg, uint32_t arena_id, uint16_t port) {
   int pkt_size = 0;
 
-  pkt_size += bin8_to_msg('\x52', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(JOINARENA, &msg[pkt_size]);
   pkt_size++;
 
   pkt_size += sprintf(&msg[pkt_size], "%s", "[");
@@ -167,7 +167,7 @@ uint16_t create_updategroupsize(char* msg, uint32_t groupid, uint32_t nr_players
 uint16_t create_createsession(char* msg, char* session_name, uint32_t session_id) {
   int pkt_size = 0;
 
-  pkt_size += bin8_to_msg('\x1a', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(CREATESESSION, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "[s%s", session_name);
   pkt_size++;  
@@ -181,7 +181,7 @@ uint16_t create_createsession(char* msg, char* session_name, uint32_t session_id
 uint16_t create_playerpoints(char* msg, char* username, uint32_t points, uint32_t trophies, char* game) {
   int pkt_size = 0;
 
-  pkt_size += bin8_to_msg((uint8_t)'\x98', &msg[pkt_size]);
+  pkt_size += bin8_to_msg((uint8_t)SCORECARD, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "[s%s", username);
   pkt_size++;  
@@ -279,14 +279,14 @@ uint16_t create_sessionnew(char* msg, char* name, char* game, char* allowedbranc
 
 // Group GroupId PGroupId  MaxP  MaxV  NbP  NbV  Master  Config  Info Game AllowedBranch
 //  %s     %ld     %ld     %ld   %ld   %ld  %ld    %s     %ld     %s   %s       %s       
-uint16_t create_new_basic_group(char* msg, uint32_t arena_id, uint32_t basicgroup_id, char* game, char* allowedbranch) {
+uint16_t create_new_basic_group(char* msg, char *name, uint32_t arena_id, uint32_t basicgroup_id, char* game, char* allowedbranch) {
   int pkt_size = 0;
 
-  pkt_size += sprintf(&msg[pkt_size], "s%s", "Shumania");
+  pkt_size += sprintf(&msg[pkt_size], "s%s", name[0] == '\0' ? "Shumania" : name);
   pkt_size++;
   pkt_size += bin32_to_msg(basicgroup_id, &msg[pkt_size]);
   pkt_size += bin32_to_msg(arena_id, &msg[pkt_size]);
-  pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
+  pkt_size += bin32_to_msg((uint32_t)100, &msg[pkt_size]);
   pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
   pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
   pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
@@ -308,7 +308,7 @@ uint16_t create_new_basic_group(char* msg, uint32_t arena_id, uint32_t basicgrou
 uint16_t create_getsession(char* msg, char* username, char* name, char* game, char* gameinfo, char* master, uint32_t session_id, uint32_t group_id, uint32_t max_players, uint32_t max_observers, uint32_t conf) {
   int pkt_size = 0;
   
-  pkt_size += bin8_to_msg('\x57', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(GETSESSION, &msg[pkt_size]);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "[s%s", username);
   pkt_size++;
@@ -336,7 +336,7 @@ uint16_t create_getsession(char* msg, char* username, char* name, char* game, ch
 uint16_t create_playerinfo(char* msg, char* username, char* ip, char extended) {
   int pkt_size = 0;
 
-  pkt_size += bin8_to_msg('\x13', &msg[pkt_size]);
+  pkt_size += bin8_to_msg(PLAYERINFO, &msg[pkt_size]);
   pkt_size++;
 
   pkt_size += sprintf(&msg[pkt_size], "[su%s", username);

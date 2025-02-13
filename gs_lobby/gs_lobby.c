@@ -586,9 +586,9 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     return 0;
   }
 
-  if (recv_flag != DBUPDATEFULLSTATS && recv_flag != STATS_POINT 	// TODO
-		  && recv_flag != STATS_CASH && recv_flag != STATS_STANDARDAVG
-		  && recv_flag != STATS_STANDARDWIN)
+  if (recv_flag != SDO_DBUPDATE_FULLSTATS && recv_flag != SDO_STATS_POINT 	// TODO
+		  && recv_flag != SDO_STATS_CASH && recv_flag != SDO_STATS_STANDARDAVG
+		  && recv_flag != SDO_STATS_STANDARDWIN)
   {
     //Jump the header
     pos = pos + 6;
@@ -894,7 +894,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       
       sess->session_config = SESSION_LOCKED;
       pkt_size = create_updatesessions(&msg[6], groupid, sess->session_config);
-      pkt_size = create_gs_hdr(msg, UPDATESESSIONS, 0x24, pkt_size);
+      pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, pkt_size);
       send_msg_to_lobby(s, msg, pkt_size);
       /* Start game server for this session */
       safe_fork_gameserver(s, sess);

@@ -72,11 +72,12 @@ int get_server_config(server_data_t *s, char *fn) {
   int server_port = 0, waitmodule_port = 0, server_type = 0;
   int arena_id = 0, basicgroup_id = 0, start_session_id = 0;
   int max_sessions = 0, max_players = 0;
-  char server_ip[16], server_db_path[256], buf[1024];
+  char server_ip[16], server_db_path[256], buf[1024], server_name[32];
   
   memset(buf, 0, sizeof(buf));
   memset(server_ip, 0, sizeof(server_ip));
   memset(server_db_path, 0, sizeof(server_db_path));
+  server_name[0] = '\0';
   
   if (file != NULL) {
     while (fgets(buf, sizeof(buf), file) != NULL) {
@@ -90,6 +91,7 @@ int get_server_config(server_data_t *s, char *fn) {
       sscanf(buf, "SERVER_MAX_PLAYERS=%d", &max_players);
       sscanf(buf, "SERVER_MAX_SESSIONS=%d", &max_sessions);    
       sscanf(buf, "SERVER_DB_PATH=%s", server_db_path);
+      sscanf(buf, "SERVER_NAME=%31s", server_name);
     }
     fclose(file);
   } else {
@@ -144,6 +146,7 @@ int get_server_config(server_data_t *s, char *fn) {
 
   strncpy(s->server_ip, server_ip, sizeof(server_ip));
   strncpy(s->server_db_path, server_db_path, sizeof(server_db_path));
+  strncpy(s->name, server_name, sizeof(server_name));
 
   s->waitmodule_port = (uint16_t)waitmodule_port;
   s->server_port = (uint16_t)server_port;
@@ -181,6 +184,8 @@ int get_server_config(server_data_t *s, char *fn) {
   gs_info("\tSERVER_MAX_PLAYERS: %d", s->max_players);
   gs_info("\tSERVER_MAX_SESSIONS: %d", s->max_sessions);
   gs_info("\tSERVER_DB_PATH: %s", s->server_db_path);
+  if (s->name[0] != '\0')
+    gs_info("\tSERVER_NAME: %s", s->name);
 
   return 1;
 }
@@ -370,9 +375,22 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_gs_hdr(msg, ARENANEW, 0x14, pkt_size);
       send_gs_msg(sock, msg, pkt_size);
 
-      pkt_size = create_new_basic_group(&msg[6], s->arena_id, s->basicgroup_id, s->game, s->allowedbranch);
-      pkt_size = create_gs_hdr(msg, NEWBASICGROUP, 0x14, pkt_size);
-      send_gs_msg(sock, msg, pkt_size);
+      if (s->server_type == SDO_SERVER)
+      {
+        pkt_size = create_new_basic_group(&msg[6], s->name, s->arena_id, s->basicgroup_id, s->game, s->game);
+        pkt_size = create_gs_hdr(msg, NEWBASICGROUP, 0x14, pkt_size);
+        send_gs_msg(sock, msg, pkt_size);
+
+        pkt_size = create_new_basic_group(&msg[6], s->name, s->arena_id, s->basicgroup_id + 1, s->game, s->allowedbranch);
+        pkt_size = create_gs_hdr(msg, NEWBASICGROUP, 0x14, pkt_size);
+        send_gs_msg(sock, msg, pkt_size);
+      }
+      else
+      {
+        pkt_size = create_new_basic_group(&msg[6], s->name, s->arena_id, s->basicgroup_id, s->game, s->allowedbranch);
+        pkt_size = create_gs_hdr(msg, NEWBASICGROUP, 0x14, pkt_size);
+        send_gs_msg(sock, msg, pkt_size);
+      }
 
       pkt_size = create_updategroupsize(&msg[6], s->basicgroup_id, s->group_size);
       pkt_size = create_gs_hdr(msg, UPDATEGROUPSIZE, 0x14, pkt_size);
@@ -429,9 +447,9 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     gs_info("Is people searching for other players?");    
     
     break;
-  case CUSTOM_DC_STAT:
+  case SCORECARD:
     if (nr_parsed != 2) {
-      gs_error("Got %d strings from CUSTOM_DC_STAT packet needs 2", nr_parsed);
+      gs_error("Got %d strings from SCORECARD packet needs 2", nr_parsed);
       return 0;
     }
 
