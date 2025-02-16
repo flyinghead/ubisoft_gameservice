@@ -47,7 +47,44 @@ sqlite3* open_gs_db(const char* db_path) {
    return db;
 }
 
-int create_player_record(sqlite3* db, const char* username) {
+void create_player_cars(sqlite3* db, int playerId)
+{
+  const char* zSql = "INSERT INTO PLAYER_CAR (PLAYER_ID, CAR_NUM) VALUES (?, ?)";
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Prepare SQL error: %d", rc);
+    return;
+  }
+  rc = sqlite3_bind_int(pStmt, 1, playerId);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind int failed error: %d", rc);
+    return;
+  }
+  for (int carnum = 0; carnum < 10; carnum++)
+  {
+    rc = sqlite3_bind_int(pStmt, 2, carnum);
+    if (rc != SQLITE_OK) {
+      gs_error("Bind int failed error: %d", rc);
+      break;
+    }
+    rc = sqlite3_step(pStmt);
+    if (rc != SQLITE_DONE) {
+      gs_error("Insert failed error: %d", rc);
+      break;
+    }
+    if (sqlite3_reset(pStmt) != SQLITE_OK) {
+      gs_error("Can't reset the statement: %d", rc);
+      break;
+    }
+  }
+  sqlite3_finalize(pStmt);
+}
+
+int create_player_record(sqlite3* db, const char* username, int sdo) {
   int rc = 0;
   sqlite3_stmt *pStmt;
 
@@ -82,6 +119,8 @@ int create_player_record(sqlite3* db, const char* username) {
   sqlite3_finalize(pStmt);
   gs_info("Records created successfully for %s", username);
   
+  if (sdo)
+    create_player_cars(db, sqlite3_last_insert_rowid(db));
   sqlite3_mutex_leave(sqlite3_db_mutex(db));
   
   return 1;
@@ -549,3 +588,258 @@ int load_fivescorebefore_record(sqlite3 *db, const char* username, char* msg, ui
   sqlite3_mutex_leave(sqlite3_db_mutex(db));
   return (index);
 }
+
+int load_player_blob(sqlite3 *db, const char* username, const char *blobname, uint8_t *data, int *size)
+{
+  sqlite3_mutex_enter(sqlite3_db_mutex(db));
+
+  char zSql[128];
+  sprintf(zSql, "SELECT %s from PLAYER_DATA WHERE USERNAME = trim(?)", blobname);
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Prepare SQL error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind text failed error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  int count;
+  rc = sqlite3_step(pStmt);
+  //Getting no lines
+  if (rc == SQLITE_DONE) {
+    gs_info("Username: %s is missing player record in DB", username);
+    *size = 0;
+    count = 2;
+  } else if (rc == SQLITE_ROW) {
+    int len = sqlite3_column_bytes(pStmt, 0);
+    if (len > *size)
+      len = *size;
+    else
+      *size = len;
+    memcpy(data, sqlite3_column_blob(pStmt, 0), len);
+    count = 1;
+  } else {
+    gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
+    *size = 0;
+    count = 0;
+  }
+
+  sqlite3_finalize(pStmt);
+  sqlite3_mutex_leave(sqlite3_db_mutex(db));
+  return count;
+}
+
+int load_player_data(sqlite3 *db, const char* username, uint8_t *data, int *size) {
+  return load_player_blob(db, username, "PLAYERDATA", data, size);
+}
+
+int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int *size) {
+  return load_player_blob(db, username, "FULLSTATS", data, size);
+}
+
+int update_player_blob(sqlite3 *db, const char* username, const char *blobname, const uint8_t *data, int size)
+{
+  sqlite3_mutex_enter(sqlite3_db_mutex(db));
+
+  char zSql[128];
+  sprintf(zSql, "UPDATE PLAYER_DATA SET %s = ? WHERE USERNAME = trim(?)", blobname);
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Prepare SQL error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind blob failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(pStmt, 2, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind text failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    return 0;
+  }
+  sqlite3_finalize(pStmt);
+  sqlite3_mutex_leave(sqlite3_db_mutex(db));
+
+  return 1;
+}
+
+int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, int size) {
+  return update_player_blob(db, username, "PLAYERDATA", data, size);
+}
+
+int update_player_fullstats(sqlite3 *db, const char* username, const uint8_t *data, int size) {
+  return update_player_blob(db, username, "FULLSTATS", data, size);
+}
+
+int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, int *size)
+{
+  sqlite3_mutex_enter(sqlite3_db_mutex(db));
+
+  const char *zSql = "SELECT CARDATA from PLAYER_CAR "
+      "INNER JOIN PLAYER_DATA ON PLAYER_DATA.ID = PLAYER_CAR.PLAYER_ID "
+      "WHERE PLAYER_DATA.USERNAME = trim(?) AND PLAYER_CAR.CAR_NUM = ?";
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Prepare SQL error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind text failed error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  rc = sqlite3_bind_int(pStmt, 2, carnum);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind int failed error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  int count;
+  rc = sqlite3_step(pStmt);
+  //Getting no lines
+  if (rc == SQLITE_DONE) {
+    //gs_info("Username: %s is missing car in DB", username);
+    *size = 0;
+    count = 2;
+  } else if (rc == SQLITE_ROW) {
+    int len = sqlite3_column_bytes(pStmt, 0);
+    if (len > *size)
+      len = *size;
+    else
+      *size = len;
+    memcpy(data, sqlite3_column_blob(pStmt, 0), len);
+    count = 1;
+  } else {
+    gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
+    *size = 0;
+    count = 0;
+  }
+
+  sqlite3_finalize(pStmt);
+  sqlite3_mutex_leave(sqlite3_db_mutex(db));
+  return count;
+}
+
+int update_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, int size)
+{
+  sqlite3_mutex_enter(sqlite3_db_mutex(db));
+
+  const char *zSql = "SELECT ID FROM PLAYER_DATA WHERE USERNAME = trim(?)";
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Prepare SQL error: %d", rc);
+    return 0;
+  }
+  rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind int failed error: %d", rc);
+    return 0;
+  }
+  rc = sqlite3_step(pStmt);
+  int playerId = 0;
+  if (rc == SQLITE_ROW) {
+    playerId = sqlite3_column_int(pStmt, 0);
+  }
+  else {
+    gs_info("Username: %s is missing in update player_car", username);
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    return 0;
+  }
+  sqlite3_finalize(pStmt);
+
+  zSql = "UPDATE PLAYER_CAR SET CARDATA = ? WHERE PLAYER_ID = ? AND CAR_NUM = ?";
+  rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Prepare SQL error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind blob failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_int(pStmt, 2, playerId);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind text failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_int(pStmt, 3, carnum);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    gs_error("Bind int failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    sqlite3_finalize(pStmt);
+    sqlite3_mutex_leave(sqlite3_db_mutex(db));
+    return 0;
+  }
+  sqlite3_finalize(pStmt);
+  sqlite3_mutex_leave(sqlite3_db_mutex(db));
+
+  return 1;
+}
+

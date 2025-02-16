@@ -336,7 +336,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     }
     rc = load_player_record(s->db, pl->username, &pl->points, &pl->trophies);
     if ( rc == 2 )
-      rc = create_player_record(s->db, pl->username);
+      rc = create_player_record(s->db, pl->username, s->server_type == SDO_SERVER);
     sqlite3_close(s->db);
 
     if (rc != 1) {

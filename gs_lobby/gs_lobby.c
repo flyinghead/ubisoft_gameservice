@@ -38,6 +38,7 @@
 
 #define GS_PORT_OFFSET 30000
 #define SESSION_LOCKED 8
+#define SESSION_WAITING 0x10
 #define PASSWORD_PROTECTED 15
 
 void player_cleanup(server_data_t *s, player_t *pl);
@@ -74,7 +75,7 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
 
   char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258];
   sprintf(arg_1, "%s %d", "-p", sess->session_gameport);
-  sprintf(arg_2, "%s %d", "-n", sess->session_nb_players);
+  sprintf(arg_2, "%s %d", "-n", sess->session_config == SESSION_WAITING ? sess->session_max_players : sess->session_nb_players);
   sprintf(arg_3, "%s%s", "-m", sess->session_master);
   sprintf(arg_4, "%s%s", "-d", s->server_db_path);
   sprintf(arg_5, "%s %d", "-t", s->server_type);
@@ -482,8 +483,8 @@ int add_server_session(server_data_t *s,
     return 0;
   }
   /* Session name and session master is the same here*/
-  if (strlen(session_name) > sizeof(sess->session_master)) {
-    gs_info("Session master is larger then buffer");
+  if (pl != NULL && strlen(pl->username) > sizeof(sess->session_master)) {
+    gs_info("Session master is larger than buffer");
     return 0;
   }
   
@@ -492,7 +493,10 @@ int add_server_session(server_data_t *s,
   strlcpy(sess->session_gameversion, session_gameversion, strlen(session_gameversion)+1); 
   strlcpy(sess->session_gameinfo, session_gameinfo, strlen(session_gameinfo)+1);
   strlcpy(sess->session_password, session_password, strlen(session_password)+1);
-  strlcpy(sess->session_master, session_name, strlen(session_name)+1);
+  if (pl != NULL)
+    strlcpy(sess->session_master, pl->username, strlen(pl->username)+1);
+  else
+    strlcpy(sess->session_master, session_name, strlen(session_name)+1);
     
   sess->session_gs_version = session_gs_version;
   sess->session_max_players = session_max_players;
@@ -734,6 +738,12 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
 	send_msg_to_others_in_lobby(s, pl, msg, pkt_size);
       }
+      else if (sess->session_config == SESSION_WAITING) {
+      // needed to avoid hang on Connecting to the waiting room...
+	pkt_size = create_startgame(&msg[6], groupid, s->server_ip, sess->session_gameport);
+	pkt_size = create_gs_hdr(msg, STARTGAME, 0x24, pkt_size);
+	send_gs_msg(sock, msg, pkt_size);
+      }
             
     } else {
       /* Not a Session */
@@ -777,12 +787,16 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d values from CREATESESSION packet needs 7", nr_b_parsed);
       return 0;
     }
+    gs_info("CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
+	    tok_array[0], tok_array[1], tok_array[2], tok_array[3], tok_array[4],
+	    byte_array[0], byte_array[1], byte_array[2], byte_array[3],
+	    byte_array[4], byte_array[5], byte_array[6]);
 
     sess = (session_t *)malloc(sizeof(session_t));     
     if (!add_server_session(s,
 			    sess,
 			    pl,
-			    pl->username,
+			    tok_array[0], /* pl->username */
 			    tok_array[1],
 			    tok_array[2],
 			    tok_array[3],
@@ -891,8 +905,10 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       pkt_size = create_begingame(&msg[6], groupid);
       pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
       send_gs_msg(sock, msg, pkt_size);
-      
-      sess->session_config = SESSION_LOCKED;
+      if (s->server_type == SDO_SERVER)
+        sess->session_config = SESSION_WAITING;
+      else
+        sess->session_config = SESSION_LOCKED;
       pkt_size = create_updatesessions(&msg[6], groupid, sess->session_config);
       pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, pkt_size);
       send_msg_to_lobby(s, msg, pkt_size);
@@ -963,10 +979,6 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     {
       pkt_size = (uint16_t)sprintf(&msg[6], "s%s", tok_array[0]);
       pkt_size++;
-      //pkt_size += bin8_to_msg(ping, &msg[pkt_size]);
-      //pkt_size++;
-      //pkt_size += bin32_to_msg(group, &msg[pkt_size]);
-
       pkt_size = create_gs_hdr(msg, FINDSUITABLEGROUP, 0x24, pkt_size);
     }
     break;
@@ -1089,28 +1101,6 @@ void *gs_server_handler(void* data) {
 			    0)) {
       free(sess);
       gs_error("Could not create POD Chat session");
-      return 0;
-    }
-  }
-  else if (s_data->server_type == SDO_SERVER) {	// FIXME test
-    session_t *sess = (session_t *)malloc(sizeof(session_t));
-    if (!add_server_session(s_data,
-			    sess,
-			    NULL,
-			    "Whatever",
-			    s_data->game,
-			    "1.0",
-			    "Whatever info",
-			    "",
-			    0,
-			    s_data->max_players,
-			    s_data->max_players,
-			    s_data->chatgroup_id,
-			    s_data->arena_id,
-			    0,
-			    0)) {
-      free(sess);
-      gs_error("Could not create SDO Whatever session");
       return 0;
     }
   }

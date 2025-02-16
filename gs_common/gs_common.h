@@ -191,6 +191,7 @@
 #define SDO_GMGENERROR 0x90
 #define SDO_GETBESTLAP 0x91
 #define SDO_COMMIT 0x92
+#define SDO_TRACKRECORDS  0xC8
 
 void gs_error(const char* format, ... );
 void gs_info(const char* format, ... );
