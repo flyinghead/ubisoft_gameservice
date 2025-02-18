@@ -594,7 +594,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     case SDO_PRICES_LIST:
       gs_info("Got PRICES_LIST");
       print_gs_data(buf, (long unsigned int)buf_len);
-      pkt_size = (uint16_t)uint32_to_char(0, &msg[8]);	// list size (be)
       // int(be) [1-8] type
       // type 1: car
       //	int(be) car# [0-21]
@@ -605,23 +604,65 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // type 2: tires
       //    int(be) index [0-5]: Basic, Slick, Wet, Super Dry, Snow, Spiked
       //    int(be) price
-      // type 3: ?
+      // type 3: nitro1,2,3 then mags?
       //    int(be) index [0-93]
       //    int(be) price
       // type 4-8: ?
       //    int(be) id
       //    int(be) price
       {
-    	  // test
     	  /*
-    	  pkt_size = uint32_to_char(1, &msg[8]);	// list size (be)
-    	  pkt_size += uint32_to_char(1, &msg[8 + pkt_size]);	// type=car
-    	  pkt_size += uint32_to_char(2, &msg[8 + pkt_size]);	// car #2
-    	  msg[8 + pkt_size++] = 0;								// name
-    	  pkt_size += uint32_to_char(22222, &msg[8 + pkt_size]); // price
-    	  msg[8 + pkt_size++] = 0;
-    	  msg[8 + pkt_size++] = 0;
-    	  */
+    	    D Class:
+    	    Europa $17'500
+	    Virtuose $15'000
+	    Montana $15'000
+	    Desert $10'000
+	    Thunder $10'000
+
+	    C Class:
+	    Belray $40'000
+	    Indy Gt1 $65'000
+	    Orion $55'000
+	    Special $50'000
+	    Spacecab $45'000
+	    Duffingburg $60'000
+
+	    B Class:
+	    Solaris $120'000
+	    Cortex $180'000
+	    Firebug $140'000
+	    Husky $160'000
+	    Gunzzo $220'000
+	    Goliath $200'000
+
+	    A Class:
+	    V Wings $450000
+	    LA Millenium $550000
+	    Mistery X $65000
+	    Macro F1 $750000
+	    Alien $850000
+	    */
+	  static const uint32_t carPrices[] = {
+	      // class D
+	      17500, 15000, 15000, 10000, 10000,
+	      // class C
+	      40000, 65000, 55000, 50000, 45000, 60000,
+	      // class B
+	      120000, 180000, 140000, 160000, 220000, 200000,
+	      // class A
+	      450000, 550000, 650000, 750000, 850000,
+	  };
+	  const size_t count = sizeof(carPrices) / sizeof(carPrices[0]);
+    	  pkt_size = uint32_to_char((uint32_t)count, &msg[8]);	// list size (be)
+    	  for (size_t i = 0; i != count; i++)
+    	  {
+    	    pkt_size += uint32_to_char(1, &msg[8 + pkt_size]);            // type=car
+    	    pkt_size += uint32_to_char((uint32_t)i, &msg[8 + pkt_size]);  // car #
+    	    msg[8 + pkt_size++] = 0;                                      // name (ignored)
+    	    pkt_size += uint32_to_char(carPrices[i], &msg[8 + pkt_size]); // price
+    	    msg[8 + pkt_size++] = 0;
+    	    msg[8 + pkt_size++] = 0;
+    	  }
     	  /*
     	  pkt_size = uint32_to_char(6, &msg[8]);	// list size (be)
     	  for (int i = 0; i < 6; i++) {
@@ -664,9 +705,61 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       */
       {
 	    int data[436] = {};
-	    data[26] = 7000;	// class C points
-	    data[27] = 14000;	// class B points
-	    data[28] = 28000;	// class A points
+	    // FIXME cash won doesn't account towards driver points
+	    // Ranking bonuses
+	    // class D
+	    data[0] = 13000;	// #1
+	    data[1] = 7700;	// #2
+	    data[2] = 4000;	// #3
+	    data[3] = 2000;	// #4
+	    data[4] = 1000;	// #5
+	    // class C
+	    data[5] = 16200;	// #1
+	    data[6] = 9600;	// #2
+	    data[7] = 4800;	// #3
+	    data[8] = 2400;	// #4
+	    data[9] = 960;	// #5
+	    // class B
+	    data[10] = 20200;	// #1
+	    data[11] = 12000;	// #2
+	    data[12] = 6000;	// #3
+	    data[13] = 3000;	// #4
+	    data[14] = 1200;	// #5
+	    // class A
+	    data[15] = 25200;	// #1
+	    data[16] = 15000;	// #2
+	    data[17] = 7500;	// #3
+	    data[18] = 3750;	// #4
+	    data[19] = 1500;	// #5
+
+	    data[22] = 100;	// ?
+	    data[23] = 100;	// ?
+
+	    data[26] = 160000;	// class C points
+	    data[27] = 800000;	// class B points
+	    data[28] = 4000000;	// class A points
+
+	    data[33] = 1500;	// race bonus 1
+	    data[34] = 1650;
+	    data[35] = 1750;
+	    data[36] = 1900;
+	    data[37] = 1500;	// race bonus 2
+	    data[38] = 1650;
+	    data[39] = 1750;
+	    data[40] = 1900;
+	    data[41] = 1500;	// race bonus 3
+	    data[42] = 1650;
+	    data[43] = 1750;
+	    data[44] = 1900;
+
+	    data[45] = 1000;	// radar busted premiums (per class)
+	    data[46] = 1150;
+	    data[47] = 1250;
+	    data[48] = 1400;
+	    data[49] = 16;	// radar busted bonus per mph (per class)
+	    data[50] = 18;
+	    data[51] = 20;
+	    data[52] = 22;
 	    memcpy(&msg[8], data, sizeof(data));
 	    pkt_size = sizeof(data);
       }
@@ -815,6 +908,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = 0;
       break;
 
+    // TODO case SDO_GETBESTLAP:
+
     default:
       gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, recv_flag);
       print_gs_data(buf, (long unsigned int)buf_len);
@@ -858,10 +953,12 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
     return 0;
   }
 
+  int new_connection = 0;
   if (pl->udp_ready == 0) {
     pl->udp_addr = *client;
     pl->udp_ready = 1;
-  }			  
+    new_connection = 1;
+  }
 
   /* Parse header */
   if (buf_len < 10) {
@@ -883,7 +980,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
     {
 	  switch(msg_id) {
 	    case EVENT_UDPCONNECT:
-	      if (1) /* s->max_players == s->current_nr_of_players) */ {
+	      if (new_connection) /* s->max_players == s->current_nr_of_players) */ {
 	    	gs_info("Got UDPCONNECT\n");
 		    pkt_size = create_gameserver_udp_hdr(msg, cliSeq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
 		    sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
