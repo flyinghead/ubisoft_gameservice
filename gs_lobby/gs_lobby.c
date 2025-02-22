@@ -43,6 +43,8 @@
 
 void player_cleanup(server_data_t *s, player_t *pl);
 void remove_server_player(player_t *pl);
+void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size);
+void remove_server_session(server_data_t *s, session_t *sess);
 
 void handler(int s) {
   gs_info("Caught a SIGPIPE");
@@ -69,31 +71,65 @@ uint16_t get_available_gameserver_port(server_data_t *s, session_t *sess) {
   return 0;
 }
 
+void *gameserver_pipe_handler(void *data) {
+  session_t *sess = (session_t *)data;
+  for (;;) {
+    char c;
+    if (read(sess->gameserver_pipe, &c, 1) <= 0)
+      break;
+    if (c == 'L') {
+      if (sess->session_config == SESSION_WAITING)
+    	sess->session_config = SESSION_LOCKED;
+    }
+    else if (c == 'U' && sess->session_config == SESSION_LOCKED)
+    	sess->session_config = SESSION_WAITING;
+    char msg[64];
+    int pkt_size = create_updatesessions(&msg[6], sess->session_groupid, sess->session_config);
+    pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, (uint16_t)pkt_size);
+    send_msg_to_lobby(sess->server, msg, (uint16_t)pkt_size);
+  }
+  return NULL;
+}
+
 void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   pid_t pid;
   int status;
+  int pipefd[2];
 
-  char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258];
-  sprintf(arg_1, "%s %d", "-p", sess->session_gameport);
-  sprintf(arg_2, "%s %d", "-n", sess->session_config == SESSION_WAITING ? sess->session_max_players : sess->session_nb_players);
-  sprintf(arg_3, "%s%s", "-m", sess->session_master);
-  sprintf(arg_4, "%s%s", "-d", s->server_db_path);
-  sprintf(arg_5, "%s %d", "-t", s->server_type);
-  
+  if (pipe(pipefd)) {
+	perror("pipe");
+	pipefd[0] = pipefd[1] = -1;
+  }
+  char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258], arg_6[258];
+  sprintf(arg_1, "-p %d", sess->session_gameport);
+  sprintf(arg_2, "-n %d", sess->session_config == SESSION_WAITING ? sess->session_max_players : sess->session_nb_players);
+  sprintf(arg_3, "-m%s", sess->session_master);
+  sprintf(arg_4, "-d%s", s->server_db_path);
+  sprintf(arg_5, "-t %d", s->server_type);
+  sprintf(arg_6, "-i %d", pipefd[1]);
+
   if (!(pid = fork())) {
     if (!fork()) {
-      gs_info("Starting GameServer with port %s:%s:%s:%s:%s",
+      gs_info("Starting GameServer with args %s %s %s %s %s %s",
 	      arg_1,
 	      arg_2,
 	      arg_3,
 	      arg_4,
-	      arg_5);
-      execle("gs_gameserver", "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, (char *)0, NULL);
+	      arg_5,
+		  arg_6);
+      execle("gs_gameserver", "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, (char *)0, NULL);
     } else {
       exit(0);
     }
   } else {
-    waitpid(pid, &status, 0);
+	close(pipefd[1]);
+	sess->gameserver_pipe = pipefd[0];
+	pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, gameserver_pipe_handler, sess) < 0)
+      gs_error("Could not create thread");
+    else
+      pthread_detach(thread_id);
+	waitpid(pid, &status, 0);
   }
   sleep(3);
 }
@@ -129,16 +165,12 @@ void *keepalive_server_handler(void *data) {
 	/* Remove session that have been active for longer then 60 sec but have 0 members */
 	if ((duration > 60) && (s->s_l[i]->session_nb_players == 0)) {
 	  gs_info("[LOBBY] - Removed empty session %s after 60 sec", s->s_l[i]->session_name);
-	  free(s->s_l[i]->p_l);
-	  free(s->s_l[i]);
-	  s->s_l[i] = NULL;
+	  remove_server_session(s, s->s_l[i]);
 	}
 	/* Remove Stale Sessions after 8h */
 	else if (duration > 28800) {
 	  gs_info("[LOBBY] - Removed stale session %s No: [%d]", s->s_l[i]->session_name, s->s_l[i]->session_nb_players);
-	  free(s->s_l[i]->p_l);
-	  free(s->s_l[i]);
-	  s->s_l[i] = NULL;
+	  remove_server_session(s, s->s_l[i]);
 	}
       }
     }  
@@ -285,7 +317,7 @@ int add_server_player(server_data_t *s, player_t *pl) {
 }
 
 void remove_server_player(player_t *pl) {
-  server_data_t *s = pl->data;
+  server_data_t *s = pl->server;
   int max_players = s->max_players;
   int i=0;
   
@@ -304,7 +336,7 @@ void remove_server_player(player_t *pl) {
 
 int add_player_to_session(session_t *sess, player_t *pl) {
   int i;
-  server_data_t *s = pl->data;
+  server_data_t *s = pl->server;
 
   /* Sometimes people can break a session creation, this will hopefully remove the stale session */
   if (pl->in_session_id != 0) {
@@ -356,6 +388,8 @@ void remove_server_session(server_data_t *s, session_t *sess) {
     if(s->s_l[i]) {
       if (s->s_l[i]->session_id == sess->session_id) {
 	gs_info("Removed session %s", sess->session_name);
+	if (sess->gameserver_pipe != -1)
+	  close(sess->gameserver_pipe);
 	free(s->s_l[i]->p_l);
 	free(s->s_l[i]);
 	s->s_l[i] = NULL;
@@ -399,7 +433,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
 
     for (i = 0; i < sess->session_max_players; i++) {
       if (sess->p_l[i]) {
-	if (sess->p_l[i]->username != NULL && sess->p_l[i]->username[0] != '\0') {
+	if (sess->p_l[i]->username[0] != '\0') {
 	  if( strcmp(pl->username, sess->p_l[i]->username) == 0 ) {
 	    gs_info("Player %s still in session %d, remove...", pl->username, sess->session_id);
 	    hit = 1;
@@ -488,15 +522,15 @@ int add_server_session(server_data_t *s,
     return 0;
   }
   
-  strlcpy(sess->session_name, session_name, strlen(session_name)+1); 
-  strlcpy(sess->session_game, session_game, strlen(session_game)+1);
-  strlcpy(sess->session_gameversion, session_gameversion, strlen(session_gameversion)+1); 
-  strlcpy(sess->session_gameinfo, session_gameinfo, strlen(session_gameinfo)+1);
-  strlcpy(sess->session_password, session_password, strlen(session_password)+1);
+  strlcpy(sess->session_name, session_name, sizeof(sess->session_name));
+  strlcpy(sess->session_game, session_game, sizeof(sess->session_game));
+  strlcpy(sess->session_gameversion, session_gameversion, sizeof(sess->session_gameversion));
+  strlcpy(sess->session_gameinfo, session_gameinfo, sizeof(sess->session_gameinfo));
+  strlcpy(sess->session_password, session_password, sizeof(sess->session_password));
   if (pl != NULL)
-    strlcpy(sess->session_master, pl->username, strlen(pl->username)+1);
+    strlcpy(sess->session_master, pl->username, sizeof(sess->session_master));
   else
-    strlcpy(sess->session_master, session_name, strlen(session_name)+1);
+    strlcpy(sess->session_master, session_name, sizeof(sess->session_master));
     
   sess->session_gs_version = session_gs_version;
   sess->session_max_players = session_max_players;
@@ -518,6 +552,8 @@ int add_server_session(server_data_t *s,
     gs_info("Session got password %s", sess->session_password);
     sess->session_config = PASSWORD_PROTECTED;
   }
+  sess->gameserver_pipe = -1;
+  sess->server = s;
   
   if (pl != NULL)
     sess->session_master_player_id = pl->player_id;
@@ -564,7 +600,7 @@ int add_server_session(server_data_t *s,
  *
  */
 uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
-  server_data_t *s = (server_data_t *)pl->data;
+  server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t recv_flag = 0;
   char *tok_array[256] =  { NULL };
@@ -970,8 +1006,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pkt_size = 0;
     break;;
   case DISCONNECTSESSION:
-    if (pl->username != NULL)
-      gs_info("%s disconnected from session", pl->username);
+    gs_info("%s disconnected from session", pl->username);
     break;;
   case FINDSUITABLEGROUP:
     // string SDODC_GARAGE
@@ -1020,7 +1055,7 @@ void *gs_server_client_handler(void *data) {
   //Receive a message from client
   while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
     gs_decode_data((uint8_t*)(c_msg+6), (size_t)(read_size-6));
-    write_size = (ssize_t)server_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
+    write_size = server_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
     if (write_size > 0) {
       send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
@@ -1111,7 +1146,7 @@ void *gs_server_handler(void* data) {
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
-    pl->data = s_data;
+    pl->server = s_data;
     pl->player_id = (uint32_t)(client_sock + 0x0100);
     pl->keepalive = (uint32_t)seconds;
     pl->in_session_id = 0;

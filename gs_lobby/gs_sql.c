@@ -120,7 +120,7 @@ int create_player_record(sqlite3* db, const char* username, int sdo) {
   gs_info("Records created successfully for %s", username);
   
   if (sdo)
-    create_player_cars(db, sqlite3_last_insert_rowid(db));
+    create_player_cars(db, (int)sqlite3_last_insert_rowid(db));
   sqlite3_mutex_leave(sqlite3_db_mutex(db));
   
   return 1;

@@ -41,6 +41,8 @@
 #define SENDTOSERVER 0x04
 #define SENDTOALLPLAYERS 0x05
 
+typedef struct server_data server_data_t;
+
 typedef struct {
   int sock;
   int is_master;
@@ -51,10 +53,10 @@ typedef struct {
   struct sockaddr_in udp_addr;
   char username[MAX_UNAME_LEN];
   uint16_t player_id;
-  void *data;
+  server_data_t *server;
 } player_t;
 
-typedef struct {
+struct server_data {
   int udp_sock;
   uint8_t server_type;
   uint8_t max_players;
@@ -68,6 +70,7 @@ typedef struct {
   uint16_t master_id;
   player_t **p_l;
   sqlite3 *db;
-} server_data_t;
+  int lobby_pipe;
+};
 
 void *gs_gameserver_handler(void* data);

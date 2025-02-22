@@ -199,7 +199,9 @@ void print_gs_data(void* pkt,unsigned long pkt_size);
 uint8_t * gs_decode_data(uint8_t * data, size_t size);
 uint8_t * gs_encode_data(uint8_t * data, size_t size);
 //HELP
+#ifndef __APPLE__
 uint32_t strlcpy(char *dst, const char *src, size_t size);
+#endif
 uint32_t char_to_uint32(char* data);
 uint16_t char_to_uint16(char* data);
 int uint32_to_char(uint32_t data, char* msg);

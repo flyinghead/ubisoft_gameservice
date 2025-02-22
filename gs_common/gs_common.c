@@ -13,6 +13,8 @@
 #include <math.h>
 #include "gs_common.h"
 
+#ifndef __APPLE__
+
 uint32_t strlcpy(char *dst, const char *src, size_t size) {
   char *d = dst;
   const char *s = src;
@@ -35,6 +37,8 @@ uint32_t strlcpy(char *dst, const char *src, size_t size) {
   
   return (uint32_t)(s - src - 1); 
 }
+
+#endif
 
 void gs_error(const char* format, ... ) {
   va_list args;

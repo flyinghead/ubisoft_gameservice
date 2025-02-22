@@ -42,8 +42,7 @@
 player_t* find_user(server_data_t *s, const char* username) {
   int i;
   for (i = 0; i < s->max_players; i++) {
-    if (s->waitmodule_p_l[i] &&
-	s->waitmodule_p_l[i]->username != NULL) {
+    if (s->waitmodule_p_l[i]) {
       if (strncmp(s->waitmodule_p_l[i]->username, username, strlen(username)) == 0) {
 	return s->waitmodule_p_l[i];
       }
@@ -144,9 +143,9 @@ int get_server_config(server_data_t *s, char *fn) {
     return 0;
   }
 
-  strncpy(s->server_ip, server_ip, sizeof(server_ip));
-  strncpy(s->server_db_path, server_db_path, sizeof(server_db_path));
-  strncpy(s->name, server_name, sizeof(server_name));
+  strncpy(s->server_ip, server_ip, sizeof(s->server_ip) - 1);
+  strncpy(s->server_db_path, server_db_path, sizeof(s->server_db_path) - 1);
+  strncpy(s->name, server_name, sizeof(s->name) - 1);
 
   s->waitmodule_port = (uint16_t)waitmodule_port;
   s->server_port = (uint16_t)server_port;
@@ -244,7 +243,7 @@ int add_waitmodule_player(server_data_t *s, player_t *pl) {
 }
 
 void remove_waitmodule_player(player_t *pl) {
-  server_data_t *s = pl->data;
+  server_data_t *s = pl->server;
   int max_players = s->max_players;
   int i=0;
   
@@ -276,7 +275,7 @@ void remove_waitmodule_player(player_t *pl) {
  *
  */
 uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
-  server_data_t *s = (server_data_t *)pl->data;
+  server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t recv_flag = 0;
   char *tok_array[256] =  { NULL };
@@ -476,8 +475,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     pkt_size = 0;
     break;
   case DISCONNECTSESSION:
-    if (pl->username != NULL)
-      gs_info("%s disconnected from session", pl->username);
+    gs_info("%s disconnected from session", pl->username);
     break;
   default:
     gs_info("Flag not supported %02x", recv_flag);
@@ -516,7 +514,7 @@ void *gs_waitmodule_client_handler(void *data) {
   //Receive a message from client
   while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
     gs_decode_data((uint8_t*)(c_msg+6), (size_t)(read_size-6));
-    write_size = (ssize_t)waitmodule_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
+    write_size = waitmodule_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
     if (write_size > 0) {
       send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
@@ -599,7 +597,7 @@ int main(int argc, char *argv[]) {
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
-    pl->data = &s_data;
+    pl->server = &s_data;
     pl->player_id = (uint32_t)(client_sock + 0x0100);
     pl->keepalive = (uint32_t)seconds;
     if (!add_waitmodule_player(&s_data, pl)) {

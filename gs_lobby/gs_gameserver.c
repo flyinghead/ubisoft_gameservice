@@ -164,20 +164,20 @@ int serverSeq = 1;
 
 uint16_t create_gameserver_udp_hdr(char* msg, uint cliSeq, uint8_t msg_id, uint8_t msg_flag, uint16_t msg_size)
 {
-  msg[0] = serverSeq >> 16;
-  msg[1] = serverSeq >> 8;
-  msg[2] = serverSeq;
+  msg[0] = (char)(serverSeq >> 16);
+  msg[1] = (char)(serverSeq >> 8);
+  msg[2] = (char)serverSeq;
   serverSeq++;
-  msg[3] = cliSeq >> 16;
-  msg[4] = cliSeq >> 8;
-  msg[5] = cliSeq;
+  msg[3] = (char)(cliSeq >> 16);
+  msg[4] = (char)(cliSeq >> 8);
+  msg[5] = (char)cliSeq;
   memset(&msg[6], 0, 4);	// no times?
   // clients send its time in ms in msg[6-7]
   // sends something in msg[8-9]?? ~500
 
-  msg[10] = msg_size + 4;
-  msg[11] = 0x10 | msg_flag;
-  msg[13] = msg_id;
+  msg[10] = (char)(msg_size + 4);
+  msg[11] = (char)(0x10 | msg_flag);
+  msg[13] = (char)msg_id;
 
   return msg_size + 14;
 }
@@ -187,7 +187,7 @@ uint16_t create_event_newplayer(char* msg, uint16_t playerid, char* username) {
   uint16_t pkt_size = 0;
   char un_buf[15];
   memset(un_buf, 0, sizeof(un_buf));
-  strlcpy(un_buf, username, strlen(username)+1);
+  strlcpy(un_buf, username, sizeof(un_buf));
 
   memcpy(msg, &playerid, sizeof(uint16_t));
   pkt_size = (uint16_t)(pkt_size + (sizeof(uint16_t)));
@@ -282,7 +282,7 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
 }
 
 void remove_gameserver_player(player_t *pl, char* msg) {
-  server_data_t *s = pl->data;
+  server_data_t *s = pl->server;
   int max_players = s->max_players;
   uint16_t pkt_size = 0;
   int i=0;
@@ -297,7 +297,7 @@ void remove_gameserver_player(player_t *pl, char* msg) {
     for(i=0;i<max_players;i++) {
       if ( s->p_l[i] && s->p_l[i]->player_id != pl->player_id) {
 	s->master_id = s->p_l[i]->player_id;
-	strlcpy(s->master, pl->username, strlen(pl->username) + 1);
+	strlcpy(s->master, pl->username, sizeof(s->master));
 	s->p_l[i]->is_master = 1;
 	gs_info("Master left the game, change to 0x%02x", s->master_id);
 	pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
@@ -338,7 +338,7 @@ player_t* get_user_from_addr(server_data_t *s, struct sockaddr_in *addr) {
 
   for(i=0;i<max_clients;i++) {
     if (s->p_l[i] != NULL) {
-      if((s->p_l[i]->addr.sin_addr.s_addr == addr->sin_addr.s_addr)) {
+      if (s->p_l[i]->addr.sin_addr.s_addr == addr->sin_addr.s_addr) {
 	return s->p_l[i];
       }
     }
@@ -377,7 +377,7 @@ int parse_gameserver_header(char *buf, int buf_len) {
  *
  */
 uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
-  server_data_t *s = (server_data_t *)pl->data;
+  server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t send_flag = 0, recv_flag = 0;
   char uname_tmp[MAX_UNAME_LEN];
@@ -401,7 +401,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       
       buf[buf_len] = '\0';
 
-      strlcpy(pl->username, &buf[8], strlen(&buf[8])+1);
+      strlcpy(pl->username, &buf[8], sizeof(pl->username));
       gs_info("GAMESERVER%d - User %s joined the Game Server", s->game_tcp_port, pl->username);
       if ((strcmp(pl->username, s->master)) == 0) {
 	pl->is_master = 1;
@@ -464,7 +464,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       
     case EVENT_UPDATESCORES:
       if (recv_size == 0x20) {
-	strlcpy(uname_tmp, &buf[8], 16);
+	strlcpy(uname_tmp, &buf[8], sizeof(uname_tmp));
 	points = ntohl(char_to_uint32(&buf[24]));
 	trophies = ntohl(char_to_uint32(&buf[28]));
 	rc = update_player_point(s->db, uname_tmp, points, trophies);
@@ -477,8 +477,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       gs_info("Got EVENT_UPDATETRACKSPEED");
       print_gs_data(buf, (long unsigned int)buf_len);
       if (recv_size == 0x2C) {
-	strlcpy(track_tmp, &buf[8], 16);
-	strlcpy(uname_tmp, &buf[24], 16);
+	strlcpy(track_tmp, &buf[8], sizeof(track_tmp));
+	strlcpy(uname_tmp, &buf[24], sizeof(uname_tmp));
 	time = ntohl(char_to_uint32(&buf[40]));
 	/* MONACO sends lap speed as track speed..... ARCADE */
 	if (s->server_type == MONACO_SERVER)
@@ -494,8 +494,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       gs_info("Got EVENT_UPDATELAPSPEED");
       print_gs_data(buf, (long unsigned int)buf_len);
       if (recv_size == 0x2C) {
-	strlcpy(track_tmp, &buf[8], 16);
-	strlcpy(uname_tmp, &buf[24], 16);
+	strlcpy(track_tmp, &buf[8], sizeof(track_tmp));
+	strlcpy(uname_tmp, &buf[24], sizeof(uname_tmp));
 	time = ntohl(char_to_uint32(&buf[40]));
 	/* MONACO sends track speed as lap speed..... ARCADE */
 	if (s->server_type == MONACO_SERVER)
@@ -520,8 +520,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       gs_info("Got EVENT_SETTRACKSPEED");
       print_gs_data(buf, (long unsigned int)buf_len);
       if (recv_size == 0x2C) {
-	strlcpy(track_tmp, &buf[8], 16);
-	strlcpy(uname_tmp, &buf[24], 16);
+	strlcpy(track_tmp, &buf[8], sizeof(track_tmp));
+	strlcpy(uname_tmp, &buf[24], sizeof(uname_tmp));
 	time = ntohl(char_to_uint32(&buf[40]));
 	rc = create_track_record(s->db, uname_tmp, track_tmp, time);
 	if (rc == 0)
@@ -533,8 +533,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       gs_info("Got EVENT_SETLAPSPEED");
       print_gs_data(buf, (long unsigned int)buf_len);
       if (recv_size == 0x2C) {
-	strlcpy(track_tmp, &buf[8], 16);
-	strlcpy(uname_tmp, &buf[24], 16);
+	strlcpy(track_tmp, &buf[8], sizeof(track_tmp));
+	strlcpy(uname_tmp, &buf[24], sizeof(uname_tmp));
 	time = ntohl(char_to_uint32(&buf[40]));
 	/* IN MONACO THIS IS SIM MODE */
 	if (s->server_type == MONACO_SERVER)
@@ -653,7 +653,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	      450000, 550000, 650000, 750000, 850000,
 	  };
 	  const size_t count = sizeof(carPrices) / sizeof(carPrices[0]);
-    	  pkt_size = uint32_to_char((uint32_t)count, &msg[8]);	// list size (be)
+    	  pkt_size = (uint16_t)uint32_to_char((uint32_t)count, &msg[8]);	// list size (be)
     	  for (size_t i = 0; i != count; i++)
     	  {
     	    pkt_size += uint32_to_char(1, &msg[8 + pkt_size]);            // type=car
@@ -663,18 +663,10 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     	    msg[8 + pkt_size++] = 0;
     	    msg[8 + pkt_size++] = 0;
     	  }
-    	  /*
-    	  pkt_size = uint32_to_char(6, &msg[8]);	// list size (be)
-    	  for (int i = 0; i < 6; i++) {
-    		  pkt_size += uint32_to_char(2, &msg[8 + pkt_size]);	// type=tire
-    		  pkt_size += uint32_to_char(i, &msg[8 + pkt_size]);	// tires #
-    		  pkt_size += uint32_to_char((i + 1) * 100, &msg[8 + pkt_size]); // price
-    	  }
-    	  */
+    	  pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PRICES_LIST, SENDTOPLAYER, pkt_size);
+    	  write(pl->sock, msg, pkt_size);
+    	  pkt_size = 0;
       }
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PRICES_LIST, SENDTOPLAYER, pkt_size);
-      write(pl->sock, msg, pkt_size);
-      pkt_size = 0;
       break;
 
     case SDO_GAME_DEFINES:
@@ -696,6 +688,9 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // 4 * int ->    45-48
       // 4 * int ->    49-52
       // 16 * 4 * 3 * 2 int -> circuits
+      //   16 circuits
+      //   4 modes: normal, reverse, mirror, reverse+mirror ?
+      //   3 radars ?
       pkt_size = 0;
       /*
       for (int i = 0; i < 21; i++) {
@@ -705,61 +700,69 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       */
       {
 	    int data[436] = {};
-	    // FIXME cash won doesn't account towards driver points
 	    // Ranking bonuses
 	    // class D
-	    data[0] = 13000;	// #1
-	    data[1] = 7700;	// #2
-	    data[2] = 4000;	// #3
-	    data[3] = 2000;	// #4
-	    data[4] = 1000;	// #5
+	    data[0] = 13000;	// #1 3000
+	    data[1] = 7700;		// #2 1500
+	    data[2] = 4000;		// #3 1000
+	    data[3] = 2000;		// #4 500
+	    data[4] = 1000;		// #5 300
 	    // class C
-	    data[5] = 16200;	// #1
-	    data[6] = 9600;	// #2
-	    data[7] = 4800;	// #3
-	    data[8] = 2400;	// #4
-	    data[9] = 960;	// #5
+	    data[5] = 16200;	// #1 6000
+	    data[6] = 9600;		// #2 3000
+	    data[7] = 4800;		// #3 2000
+	    data[8] = 2400;		// #4 1000
+	    data[9] = 960;		// #5 500
 	    // class B
-	    data[10] = 20200;	// #1
-	    data[11] = 12000;	// #2
-	    data[12] = 6000;	// #3
-	    data[13] = 3000;	// #4
-	    data[14] = 1200;	// #5
+	    data[10] = 20200;	// #1 12000
+	    data[11] = 12000;	// #2 6000
+	    data[12] = 6000;	// #3 4000
+	    data[13] = 3000;	// #4 2000
+	    data[14] = 1200;	// #5 1000
 	    // class A
-	    data[15] = 25200;	// #1
-	    data[16] = 15000;	// #2
-	    data[17] = 7500;	// #3
-	    data[18] = 3750;	// #4
-	    data[19] = 1500;	// #5
+	    data[15] = 25200;	// #1 24000
+	    data[16] = 15000;	// #2 12000
+	    data[17] = 7500;	// #3 8000
+	    data[18] = 3750;	// #4 4000
+	    data[19] = 1500;	// #5 2000
 
-	    data[22] = 100;	// ?
-	    data[23] = 100;	// ?
+	    data[20] = 6661;	// TODO ?
+	    data[21] = 5000;	// Paint job price
+	    data[22] = 100;		// TODO % (?)
+	    data[23] = 100;		// TODO % (?)
+	    data[24] = 6662;	// TODO ?
+	    data[25] = 6663;	// TODO ?
 
 	    data[26] = 160000;	// class C points
 	    data[27] = 800000;	// class B points
 	    data[28] = 4000000;	// class A points
 
-	    data[33] = 1500;	// race bonus 1
+	    data[29] = 6664;	// TODO ?
+        data[30] = 100;     // TODO % ?
+        data[31] = 100;     // TODO % ? related to car price -> item price
+        data[32] = 100;     // % cash -> driver points
+
+	    data[33] = 1500;	// race bonus 1 (per class)
 	    data[34] = 1650;
 	    data[35] = 1750;
 	    data[36] = 1900;
-	    data[37] = 1500;	// race bonus 2
+	    data[37] = 1500;	// race bonus 2 (per class)
 	    data[38] = 1650;
 	    data[39] = 1750;
 	    data[40] = 1900;
-	    data[41] = 1500;	// race bonus 3
+	    data[41] = 1500;	// race bonus 3 (per class)
 	    data[42] = 1650;
 	    data[43] = 1750;
 	    data[44] = 1900;
 
-	    data[45] = 1000;	// radar busted premiums (per class)
-	    data[46] = 1150;
-	    data[47] = 1250;
-	    data[48] = 1400;
-	    data[49] = 16;	// radar busted bonus per mph (per class)
-	    data[50] = 18;
+	    data[45] = 500;		// radar busted premiums (per class)
+	    data[46] = 1000;
+	    data[47] = 2000;
+	    data[48] = 3000;
+	    data[49] = 5;		// radar busted bonus per mph (per class)
+	    data[50] = 10;
 	    data[51] = 20;
-	    data[52] = 22;
+	    data[52] = 30;
 	    memcpy(&msg[8], data, sizeof(data));
 	    pkt_size = sizeof(data);
       }
@@ -803,13 +806,13 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	}
 	else if (size != 0)
 	{
-	  pkt_size = size;
+	  pkt_size = (uint16_t)size;
 	  for (int i = 0; i < 10; i++)
 	  {
             size = MAX_PKT_SIZE - 8 - pkt_size;
 	    load_player_car(s->db, pl->username, i, (uint8_t *)&msg[8 + pkt_size], &size);
 	    if (size != 101) {
-		msg[8 + pkt_size] = 0xff;
+		msg[8 + pkt_size] = (char)0xff;
 		size = 101;
 	    }
 	    pkt_size += size;
@@ -826,7 +829,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       msg[8 + pkt_size++] = '\0';
       for (int i = 0; i < 10; i++) {
     	  memset(&msg[8 + pkt_size], 0, 101);
-    	  msg[8 + pkt_size] = 0xff;
+    	  msg[8 + pkt_size] = (char)0xff;
     	  pkt_size += 101;
       }
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_PLAYERDATA, SENDTOPLAYER, pkt_size);
@@ -856,7 +859,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	load_player_fullstats(s->db, pl->username, (uint8_t *)&msg[10], &size);
 	if (size != 0)
 	  size += 2;
-	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_FULLSTATS, SENDTOPLAYER, size);
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_FULLSTATS, SENDTOPLAYER, (uint16_t)size);
       }
       break;
     case SDO_DBUPDATE_FULLSTATS:
@@ -883,7 +886,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // 0010 | 05 00 00 00 00 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0
       //   or   05 8C FE nn nn 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0  with nnnn increasing
       // 0020 | 20 35 20 32 20 34 20 34 20 31 20 30 00          |  5 2 4 4 1 0.
-      pkt_size = buf_len - 24 - 8;
+      pkt_size = (uint16_t)(buf_len - 24 - 8);
       memcpy(msg + 8, buf + 8, pkt_size);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
       msg[5] = 0x04; // from server??
@@ -894,10 +897,13 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     case SDO_LOCK_ROOM:
       gs_info("Got SDO_LOCK_ROOM");
       print_gs_data(buf, (long unsigned int)buf_len);
-      // FIXME don't have access to the session but this seems to work for other players in the game
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_LOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
+      {
+    	char msg = 'L';
+    	write(s->lobby_pipe, &msg, sizeof(msg));
+      }
       break;
 
     case SDO_UNLOCK_ROOM:
@@ -906,6 +912,10 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UNLOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
+      {
+    	char msg = 'U';
+    	write(s->lobby_pipe, &msg, sizeof(msg));
+      }
       break;
 
     // TODO case SDO_GETBESTLAP:
@@ -965,7 +975,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	  gs_info("GAMESERVER%d - Small UDP msg ignored (%d bytes)", s->game_tcp_port, buf_len);
     return 0;
   }
-  unsigned cliSeq = ((buf[0] & 0xff) << 16) | ((buf[1] & 0xff) << 8) | (buf[2] & 0xff);
+  unsigned cliSeq = (unsigned)(((buf[0] & 0xff) << 16) | ((buf[1] & 0xff) << 8) | (buf[2] & 0xff));
   char *p = &buf[10];
   while (p - buf < buf_len)
   {
@@ -1072,6 +1082,9 @@ void *gameserver_udp_server_handler(void *data) {
   flags |= O_NONBLOCK;
   fcntl(socket_desc, F_SETFL, flags);
   
+  int optval = 1;
+  setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
+
   server.sin_family = AF_INET;
   server.sin_addr.s_addr = INADDR_ANY;
   server.sin_port = htons( s_data->game_udp_port );
@@ -1146,7 +1159,7 @@ void *gs_gameserver_client_handler(void *data) {
   char c_msg[MAX_PKT_SIZE], s_msg[MAX_PKT_SIZE];
   memset(c_msg, 0, sizeof(c_msg));
   memset(s_msg, 0, sizeof(s_msg));
-  server_data_t *s = (server_data_t *)pl->data;
+  server_data_t *s = pl->server;
 
   struct timeval tv;
   tv.tv_sec = 1500;       /* Timeout in seconds */
@@ -1156,13 +1169,13 @@ void *gs_gameserver_client_handler(void *data) {
   
   int index = 0;
   //Receive a message from client
-  while( (read_size = recv(sock, &c_msg[index], sizeof(c_msg) - index, 0)) > 0 ) {
+  while( (read_size = recv(sock, &c_msg[index], sizeof(c_msg) - (size_t)index, 0)) > 0 ) {
     read_size += index;
     index = 0;
     while(read_size > 0) {
       int n_index;
       if ((n_index = parse_gameserver_header(&c_msg[index], (int)read_size)) > 0) {
-	write_size = (ssize_t)gameserver_msg_handler(sock, pl, s_msg, &c_msg[index], (int)n_index);
+	write_size = gameserver_msg_handler(sock, pl, s_msg, &c_msg[index], (int)n_index);
 	if (write_size > 0) {
 	  write(sock, s_msg, write_size);
 	}
@@ -1181,7 +1194,7 @@ void *gs_gameserver_client_handler(void *data) {
 	if (read_size > 0)
 	  // move partial packet to beginning of buffer
 	  memmove(&c_msg[0], &c_msg[index], read_size);
-	index = read_size;
+	index = (int)read_size;
 	break;
       }
       memset(s_msg, 0, sizeof(s_msg));
@@ -1221,7 +1234,8 @@ int main (int argc, char *argv[]) {
   uint8_t nr = 0, server_type = 0;
   char *master = NULL, *db_path = NULL;
   
-  while ((opt = getopt (argc, argv, "p:n:m:d:t:")) != -1) {
+  s_data.lobby_pipe = -1;
+  while ((opt = getopt (argc, argv, "p:n:m:d:t:i:")) != -1) {
     switch (opt) {
     case 'p':
       port = (uint16_t)str2int(optarg);
@@ -1246,24 +1260,27 @@ int main (int argc, char *argv[]) {
     case 't':
       server_type = (uint8_t)str2int(optarg);
       break;
+    case 'i':
+      s_data.lobby_pipe = str2int(optarg);
+      break;
     }
   }
   
-  if (port == 0 || nr == 0 || server_type == 0) {
-    gs_info("GAMESERVER - Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master -t <SERVER_TYPE>>");
+  if (port == 0 || nr == 0 || server_type == 0 || s_data.lobby_pipe == -1) {
+    gs_info("GAMESERVER - Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master> -t <SERVER_TYPE> -i <pipefd>");
     return 0;
   }
   if (master == NULL) {
     gs_info("GAMESERVER - Missing Master username");
     return 0;
   } else {
-    strlcpy(s_data.master, master, strlen(master)+1);
+    strlcpy(s_data.master, master, sizeof(s_data.master));
   }
   if (db_path == NULL) {
     gs_info("GAMESERVER - Missing DB PATH");
     return 0;
   } else {
-    strlcpy(s_data.server_db_path, db_path, strlen(db_path)+1);
+    strlcpy(s_data.server_db_path, db_path, sizeof(s_data.server_db_path));
   }
 
   sprintf(s_data.pidfile, "/tmp/gameserver%d.pid", port);
@@ -1333,7 +1350,7 @@ int main (int argc, char *argv[]) {
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
-    pl->data = &s_data;
+    pl->server = &s_data;
     if (!add_gameserver_player(&s_data, pl)) {
       free(pl);
       return 0;

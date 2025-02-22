@@ -7,6 +7,8 @@
 #include <sqlite3.h>
 #include "../gs_common/gs_common.h"
 
+typedef struct server_data server_data_t;
+
 typedef struct {
   int sock;
   int in_game;
@@ -17,7 +19,7 @@ typedef struct {
   uint32_t keepalive;
   uint32_t trophies;
   uint32_t points;
-  void *data;
+  server_data_t *server;
 } player_t;
 
 typedef struct {
@@ -42,9 +44,11 @@ typedef struct {
   uint16_t session_gameport;
   uint32_t session_duration;
   player_t **p_l;
+  server_data_t *server;
+  int gameserver_pipe;
 } session_t;
 
-typedef struct {
+struct server_data {
   char server_ip[INET_ADDRSTRLEN];
   char server_db_path[256];
 
@@ -71,7 +75,7 @@ typedef struct {
   player_t **server_p_l;
     
   sqlite3 *db;
-} server_data_t;
+};
 
 
 
