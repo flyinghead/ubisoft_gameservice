@@ -81,10 +81,11 @@ void *gameserver_pipe_handler(void *data) {
       if (sess->session_config == SESSION_WAITING)
     	sess->session_config = SESSION_LOCKED;
     }
-    else if (c == 'U' && sess->session_config == SESSION_LOCKED)
+    else if (c == 'U' && sess->session_config == SESSION_LOCKED) {
     	sess->session_config = SESSION_WAITING;
+    }
     char msg[64];
-    int pkt_size = create_updatesessions(&msg[6], sess->session_groupid, sess->session_config);
+    int pkt_size = create_updatesessions(&msg[6], sess->session_id, sess->session_config);
     pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, (uint16_t)pkt_size);
     send_msg_to_lobby(sess->server, msg, (uint16_t)pkt_size);
   }
