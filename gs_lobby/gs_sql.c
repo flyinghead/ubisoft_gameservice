@@ -537,7 +537,6 @@ int load_player_blob(sqlite3 *db, const char* username, const char *blobname, ui
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    sqlite3_finalize(pStmt);
     gs_error("Prepare SQL error: %d", rc);
     *size = 0;
     return 0;
@@ -592,7 +591,6 @@ int update_player_blob(sqlite3 *db, const char* username, const char *blobname, 
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    sqlite3_finalize(pStmt);
     gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
@@ -639,7 +637,6 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    sqlite3_finalize(pStmt);
     gs_error("Prepare SQL error: %d", rc);
     *size = 0;
     return 0;
@@ -689,18 +686,17 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
 int update_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, int size)
 {
   const char *zSql = "SELECT ID FROM PLAYER_DATA WHERE USERNAME = trim(?)";
+  int ret = 0;
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    sqlite3_finalize(pStmt);
     gs_error("Prepare SQL error: %d", rc);
-    return 0;
+	return ret;
   }
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
     gs_error("Bind int failed error: %d", rc);
-    return 0;
+    goto exit;
   }
   rc = sqlite3_step(pStmt);
   int playerId = 0;
@@ -709,48 +705,140 @@ int update_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *da
   }
   else {
     gs_info("Username: %s is missing in update player_car", username);
-    sqlite3_finalize(pStmt);
-    return 0;
+    goto exit;
   }
   sqlite3_finalize(pStmt);
 
   zSql = "UPDATE PLAYER_CAR SET CARDATA = ? WHERE PLAYER_ID = ? AND CAR_NUM = ?";
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    sqlite3_finalize(pStmt);
     gs_error("Prepare SQL error: %d", rc);
-    return 0;
+    return ret;
   }
 
   rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
     gs_error("Bind blob failed error: %d", rc);
-    return 0;
+    goto exit;
   }
 
   rc = sqlite3_bind_int(pStmt, 2, playerId);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
     gs_error("Bind text failed error: %d", rc);
-    return 0;
+    goto exit;
   }
 
   rc = sqlite3_bind_int(pStmt, 3, carnum);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
     gs_error("Bind int failed error: %d", rc);
-    return 0;
+    goto exit;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
     gs_error("Update failed error: %d", rc);
-    sqlite3_finalize(pStmt);
-    return 0;
+    goto exit;
   }
-  sqlite3_finalize(pStmt);
+  ret = 1;
 
-  return 1;
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
 }
 
+int load_price_list(sqlite3 *db, int type, uint32_t *prices, int size)
+{
+  const char *zSql = "SELECT ITEM_ID, PRICE FROM PRICE_LIST WHERE ITEM_TYPE = ?";
+  int ret = 0;
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    gs_error("Prepare SQL error: %d", rc);
+	return ret;
+  }
+  rc = sqlite3_bind_int(pStmt, 1, type);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int failed error: %d", rc);
+    goto exit;
+  }
+  while ((rc = sqlite3_step(pStmt)) == SQLITE_ROW) {
+    int id = sqlite3_column_int(pStmt, 0);
+    if (id >= size) {
+      gs_error("load_price_list: list too small");
+      goto exit;
+    }
+    prices[id] = (uint32_t)sqlite3_column_int(pStmt, 1);
+  }
+  if (rc != SQLITE_DONE) {
+    gs_error("SELECT failed: %d", rc);
+    goto exit;
+  }
+  ret = 1;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int load_game_defines(sqlite3 *db, int *values, int size)
+{
+  const char *zSql = "SELECT DEFNUM, DEFVALUE FROM GAME_DEFINES WHERE DEFNUM >= 0";
+  int ret = 0;
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+	gs_error("Prepare SQL error: %d", rc);
+	return ret;
+  }
+  while ((rc = sqlite3_step(pStmt)) == SQLITE_ROW) {
+	int id = sqlite3_column_int(pStmt, 0);
+	if (id >= size) {
+	  gs_error("load_game_defines: list too small");
+	  goto exit;
+	}
+	values[id] = sqlite3_column_int(pStmt, 1);
+  }
+  if (rc != SQLITE_DONE) {
+    gs_error("SELECT failed: %d", rc);
+    goto exit;
+  }
+  ret = 1;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int load_initial_cash(sqlite3 *db)
+{
+  const char *zSql = "SELECT DEFVALUE FROM GAME_DEFINES WHERE DEFNUM = -1";
+  int ret = 10000;
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
+	gs_error("Prepare SQL error");
+	return ret;
+  }
+  if (sqlite3_step(pStmt) == SQLITE_ROW)
+	ret = sqlite3_column_int(pStmt, 0);
+
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int load_motd(sqlite3 *db, char *text, int size)
+{
+  const char *zSql = "SELECT MOTD FROM MOTD";
+  memset(text, 0, size);
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
+	gs_error("Prepare SQL error");
+	return 0;
+  }
+  int ret = 0;
+  if (sqlite3_step(pStmt) == SQLITE_ROW) {
+	ret = 1;
+	strncpy(text, (char *)sqlite3_column_text(pStmt, 0), size - 1);
+  }
+  sqlite3_finalize(pStmt);
+  return ret;
+}

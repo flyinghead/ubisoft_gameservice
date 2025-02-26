@@ -17,3 +17,7 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
 int update_player_car(sqlite3 *db, const char* username, int carnum, const uint8_t *data, int size);
 int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int *size);
 int update_player_fullstats(sqlite3 *db, const char* username, const uint8_t *data, int size);
+int load_price_list(sqlite3 *db, int type, uint32_t *prices, int size);
+int load_game_defines(sqlite3 *db, int *values, int size);
+int load_initial_cash(sqlite3 *db);
+int load_motd(sqlite3 *db, char *text, int size);

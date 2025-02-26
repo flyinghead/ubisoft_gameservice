@@ -73,21 +73,40 @@ uint16_t get_available_gameserver_port(server_data_t *s, session_t *sess) {
 
 void *gameserver_pipe_handler(void *data) {
   session_t *sess = (session_t *)data;
-  for (;;) {
+  for (;;)
+  {
     char c;
     if (read(sess->gameserver_pipe, &c, 1) <= 0)
       break;
-    if (c == 'L') {
-      if (sess->session_config == SESSION_WAITING)
-    	sess->session_config = SESSION_LOCKED;
+    int update_config = 0;
+    switch (c) {
+      case 'L':
+        if (sess->session_config == SESSION_WAITING) {
+    	  sess->session_config = SESSION_LOCKED;
+    	  update_config = 1;
+        }
+        break;
+      case 'U':
+    	if (sess->session_config == SESSION_LOCKED) {
+    	  sess->session_config = SESSION_WAITING;
+    	  update_config = 1;
+    	}
+    	break;
+      case 'S':
+        if (read(sess->gameserver_pipe, &c, 1) == 1
+            && c <= sizeof(sess->session_gameinfo))
+          read(sess->gameserver_pipe, sess->session_gameinfo, (size_t)c);
+    	break;
+      default:
+    	gs_error("gameserver_pipe_handler: unknown message %d", c);
+    	break;
     }
-    else if (c == 'U' && sess->session_config == SESSION_LOCKED) {
-    	sess->session_config = SESSION_WAITING;
+    if (update_config) {
+      char msg[64];
+      int pkt_size = create_updatesessions(&msg[6], sess->session_id, sess->session_config);
+      pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, (uint16_t)pkt_size);
+      send_msg_to_lobby(sess->server, msg, (uint16_t)pkt_size);
     }
-    char msg[64];
-    int pkt_size = create_updatesessions(&msg[6], sess->session_id, sess->session_config);
-    pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, (uint16_t)pkt_size);
-    send_msg_to_lobby(sess->server, msg, (uint16_t)pkt_size);
   }
   return NULL;
 }
