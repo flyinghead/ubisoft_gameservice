@@ -122,7 +122,7 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   }
   char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258], arg_6[258];
   sprintf(arg_1, "-p %d", sess->session_gameport);
-  sprintf(arg_2, "-n %d", sess->session_config == SESSION_WAITING ? sess->session_max_players : sess->session_nb_players);
+  sprintf(arg_2, "-n %d", s->server_type == SDO_SERVER ? sess->session_max_players : sess->session_nb_players);
   sprintf(arg_3, "-m%s", sess->session_master);
   sprintf(arg_4, "-d%s", s->server_db_path);
   sprintf(arg_5, "-t %d", s->server_type);
@@ -584,20 +584,27 @@ int add_server_session(server_data_t *s,
   for (i=0; i<sess->session_max_players; i++) {
     sess->p_l[i] = NULL;
   }
-  
+  pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_sessions;i++) {
     if(!(s->s_l[i])) {
-      sess->session_id = s->start_session_id + (uint32_t)i; 
-      sess->session_gameport = get_available_gameserver_port(s, sess);
-      if (sess->session_gameport == 0) {
-	sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
-	gs_error("Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
-      }
       s->s_l[i] = sess;
+      sess->session_id = s->start_session_id + (uint32_t)i;
+      if (s->server_type == SDO_SERVER) {
+	sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
+      }
+      else {
+        sess->session_gameport = get_available_gameserver_port(s, sess);
+        if (sess->session_gameport == 0) {
+	  sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
+	  gs_error("Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
+        }
+      }
+      pthread_mutex_unlock(&s->mutex);
       gs_info("Added session %s with groupid: %d and port: %d", sess->session_name, sess->session_id, sess->session_gameport);
       return 1;
     }
   }
+  pthread_mutex_unlock(&s->mutex);
   gs_info("Could not add session %s", sess->session_name);
   gs_info("No more session available");
   return 0;
@@ -795,7 +802,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	send_msg_to_others_in_lobby(s, pl, msg, pkt_size);
       }
       else if (sess->session_config == SESSION_WAITING) {
-      // needed to avoid hang on Connecting to the waiting room...
+	// needed to avoid hang on Connecting to the waiting room...
 	pkt_size = create_startgame(&msg[6], groupid, s->server_ip, sess->session_gameport);
 	pkt_size = create_gs_hdr(msg, STARTGAME, 0x24, pkt_size);
 	send_gs_msg(sock, msg, pkt_size);
@@ -961,10 +968,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       pkt_size = create_begingame(&msg[6], groupid);
       pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
       send_gs_msg(sock, msg, pkt_size);
-      if (s->server_type == SDO_SERVER)
-        sess->session_config = SESSION_WAITING;
-      else
-        sess->session_config = SESSION_LOCKED;
+      sess->session_config = SESSION_LOCKED;
       pkt_size = create_updatesessions(&msg[6], groupid, sess->session_config);
       pkt_size = create_gs_hdr(msg, UPDATESESSIONSTATE, 0x24, pkt_size);
       send_msg_to_lobby(s, msg, pkt_size);

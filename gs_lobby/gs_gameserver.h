@@ -5,6 +5,7 @@
 
 */
 #include <sqlite3.h>
+#include <pthread.h>
 #include "../gs_common/gs_common.h"
 
 /* MSG ID */
@@ -71,6 +72,7 @@ struct server_data {
   player_t **p_l;
   sqlite3 *db;
   int lobby_pipe;
+  pthread_mutex_t mutex;
 };
 
 void *gs_gameserver_handler(void* data);

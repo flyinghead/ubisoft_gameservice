@@ -222,6 +222,9 @@ void init_server(int argc, char *argv[], server_data_t *s) {
     s->waitmodule_p_l[i] = NULL;
   for(i=0;i<(s->max_players);i++)
     s->server_p_l[i] = NULL;
+  pthread_mutexattr_t mutexattr;
+  pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
+  pthread_mutex_init(&s->mutex, &mutexattr);
 }
 
 int add_waitmodule_player(server_data_t *s, player_t *pl) {

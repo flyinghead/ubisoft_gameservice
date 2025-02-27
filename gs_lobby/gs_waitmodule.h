@@ -6,6 +6,7 @@
 */
 #include <sqlite3.h>
 #include "../gs_common/gs_common.h"
+#include <pthread.h>
 
 typedef struct server_data server_data_t;
 
@@ -75,6 +76,7 @@ struct server_data {
   player_t **server_p_l;
     
   sqlite3 *db;
+  pthread_mutex_t mutex;
 };
 
 

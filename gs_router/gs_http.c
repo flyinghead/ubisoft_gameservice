@@ -196,7 +196,7 @@ void *gs_http_server_handler(void *data) {
   server.sin_port = htons( HTTP_PORT );
   
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
-    gs_error("Bind failed. Error");
+    gs_error("Bind failed on port %d. Error", HTTP_PORT);
     return 0;
   }
   gs_info("HTTP TCP listener on port: %d", ntohs(server.sin_port));

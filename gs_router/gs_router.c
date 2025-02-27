@@ -30,6 +30,7 @@
 #include <signal.h>
 #include <stdio.h> 
 #include <netinet/tcp.h>
+#include <sqlite3.h>
 
 #include "gs_router.h"
 #include "gs_http.h"
@@ -161,6 +162,7 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
   char *lastname = NULL;
   char *email = NULL;
   char *country = NULL;
+  sqlite3 *db = NULL;
 
   buf[buf_len] = '\0';
   //Parse header
@@ -210,17 +212,17 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
 
 
     //OK - Connect to DB
-    s->db = open_gs_db(s->gs_db_path);
-    if (s->db == NULL) {
+    db = open_gs_db(s->gs_db_path);
+    if (db == NULL) {
       gs_error("Could not connect to database");
       return 0;
     }
     
-    ret = is_player_in_gs_db(s->db, username);
+    ret = is_player_in_gs_db(db, username);
 
     //Not in db
     if (ret == 2) { 
-      ret = write_player_to_gs_db(s->db,
+      ret = write_player_to_gs_db(db,
 				  username,
 				  password,
 				  firstname,
@@ -231,21 +233,17 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
 	/*Create account failed = 1*/
 	pkt_size = create_gsfail(&msg[6], NEWUSERREQUEST, 1);
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
-	sqlite3_close(s->db);
-	return pkt_size;
+	break;
       }
       //In Db
     } else if (ret == 1) { 
       /*Account already exists = 9*/
       pkt_size = create_gsfail(&msg[6], NEWUSERREQUEST, 9);
       pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
-      sqlite3_close(s->db);
-      return pkt_size;
+      break;
     } else {
-      sqlite3_close(s->db);
-      return 0;
+      break;
     }
-    sqlite3_close(s->db);
     
     pkt_size = create_gssuccessful(&msg[6], NEWUSERREQUEST);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
@@ -264,21 +262,20 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
     gs_info("User %s tries to join...", username);
 
     //OK - Connect to DB
-    s->db = open_gs_db(s->gs_db_path);
-    if (s->db == NULL) {
+    db = open_gs_db(s->gs_db_path);
+    if (db == NULL) {
       gs_error("Could not connect to database");
       return 0;
     }
     
-    ret = validate_player_login(s->db, username, password);
+    ret = validate_player_login(db, username, password);
         
     if (ret != 1) {
       gs_error("User not allowed to login %s", password);
       /*GeneralFail = 1, WrongPassword = 2, AlreadyLoggedIn = 3, InvalidUsername = 4*/
       pkt_size = create_gsfail(&msg[6], LOGIN, 2);
       pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
-      sqlite3_close(s->db);
-      return pkt_size;
+      break;
     }
     
     if (strncmp(game, "POD2DC1.0", 9) == 0) {
@@ -292,15 +289,13 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
       gs_error("Game %s is unsupported", game);
       pkt_size = create_gsfail(&msg[6], LOGIN, 1);
       pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
-      sqlite3_close(s->db);
-      return pkt_size;
+      break;
     }
 
-    ret = update_player_lastlogin(s->db, username);
+    ret = update_player_lastlogin(db, username);
     if (ret != 1) {
       gs_error("Could not update lastlogin for username %s", username);
     }
-    sqlite3_close(s->db);
     
     pkt_size = create_gssuccessful(&msg[6], LOGIN);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
@@ -314,7 +309,7 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
       pkt_size = create_joinwaitmodule(&msg[6], s->gs_wm_sdo_ip, s->gs_wm_sdo_port);
     } else {
       gs_error("Unsupported game");
-      return 0;
+      break;
     }
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
     break;;
@@ -322,7 +317,8 @@ uint16_t msg_handler(int sock, player_t* pl, char* msg, char* buf, int buf_len) 
     gs_info("Flag not supported %u", recv_flag);
     return 0;
   }
-    
+  if (db != NULL)
+    sqlite3_close(db);
   return pkt_size;
 }
 

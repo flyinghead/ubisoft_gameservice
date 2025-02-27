@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <sqlite3.h>
 #include <netinet/in.h>
 
 #define ROUTER_TCP_PORT 40000
@@ -17,8 +16,6 @@ typedef struct {
   
   char gs_db_path[256];
   char gs_config_path[256];
-  //DB
-  sqlite3 *db;
 } server_data_t;
 
 typedef struct {
