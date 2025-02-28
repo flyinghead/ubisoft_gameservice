@@ -67,12 +67,13 @@ struct server_data {
   struct timespec start_time;
   char master[MAX_UNAME_LEN];
   char server_db_path[MAX_UNAME_LEN];
-  char pidfile[25];
+  char pidfile[32];
   uint16_t master_id;
   player_t **p_l;
   sqlite3 *db;
   int lobby_pipe;
   pthread_mutex_t mutex;
+  char session_info[32];
 };
 
 void *gs_gameserver_handler(void* data);

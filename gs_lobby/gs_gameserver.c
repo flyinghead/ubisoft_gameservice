@@ -77,7 +77,8 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
     pthread_mutex_unlock(&s->mutex);
     break;;
   default:
-    gs_info("GAMESERVER%d - Flag not supported %u", s->game_tcp_port, send_flag);
+    gs_info("GAMESERVER%d - TCP Flag not supported %u", s->game_tcp_port, send_flag);
+    print_gs_data(msg, pkt_size);
   }
 }
 
@@ -129,8 +130,8 @@ void send_udp_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_
     pthread_mutex_unlock(&s->mutex);
     break;;
   default:
-    gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, send_flag);
-    print_gs_data(msg, (long unsigned int)pkt_size);
+    gs_info("GAMESERVER%d - UDP Flag not supported %x", s->game_tcp_port, send_flag);
+    print_gs_data(msg, pkt_size);
   }
 }
 
@@ -336,7 +337,7 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   if (s->current_nr_of_players == 0) {
     gs_info("GAMESERVER%d - Server is empty...exit", s->game_tcp_port);
 
-    if (remove(s->pidfile) != 0)
+    if (s->pidfile[0] != '\0' && remove(s->pidfile) != 0)
       gs_error("Could not remove %s", s->pidfile);
 
     if (sqlite3_close(s->db) != SQLITE_OK) {
@@ -457,6 +458,15 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_event_ownid(&msg[8], pl->player_id, s->current_nr_of_players, s->max_players);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_OWNID, SENDTOALLPLAYERS, pkt_size);
       write(pl->sock, msg, pkt_size);
+      /* Send player list */
+      for(int i = 0; i < s->max_players; i++) {
+	  if (s->p_l[i] && s->p_l[i]->player_id != pl->player_id) {
+	      memset(msg, 0, MAX_PKT_SIZE);
+	      pkt_size = create_event_newplayer(&msg[8], s->p_l[i]->player_id, s->p_l[i]->username);
+	      pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
+	      write(pl->sock, msg, pkt_size);
+	  }
+      }
 
       rc = load_player_record(s->db, pl->username, &pl->points, &pl->trophies);
       if (rc != 1) {
@@ -464,7 +474,11 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	pl->trophies = 0;
 	pl->points = 0;
       }
-      
+      /* Notify other users */
+      pkt_size = create_event_newplayer(&msg[8], pl->player_id, pl->username);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
+      send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
+
       pkt_size = 0;
       break;;
       
@@ -883,6 +897,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // 0010 | 05 00 00 00 00 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0
       //   or   05 8C FE nn nn 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0  with nnnn increasing
       // 0020 | 20 35 20 32 20 34 20 34 20 31 20 30 00          |  5 2 4 4 1 0.
+      strlcpy(s->session_info, &msg[21], sizeof(s->session_info));
       pkt_size = 13;
       memcpy(msg + 8, buf + 8, pkt_size);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
@@ -893,14 +908,14 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     	char msg[64] = { 'S' };
     	int len = buf_len - 0x15;
     	if (len + 2 > sizeof(msg)) {
-    		gs_error("SDO_UPDATE_SESSION_INFO: overflow: %d bytes", len);
+    	  gs_error("SDO_UPDATE_SESSION_INFO: overflow: %d bytes", len);
     	}
     	else {
-    		msg[1] = (char)len;
-    		memcpy(&msg[2], &buf[0x15], len);
-    		ssize_t ret = write(s->lobby_pipe, msg, (size_t)(len + 2));
-    		if (ret < 0)
-    			perror("write(pipe)");
+    	  msg[1] = (char)len;
+    	  memcpy(&msg[2], &buf[0x15], len);
+    	  ssize_t ret = write(s->lobby_pipe, msg, (size_t)(len + 2));
+    	  if (ret < 0)
+    	    perror("write(pipe)");
     	}
       }
       break;
@@ -942,19 +957,61 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // TODO update lobby session? wakeup? send to others?
       break;
 
-    // TODO case SDO_GETBESTLAP:
+    case SDO_PLAYER_KICK:
+      // 0000 | 00 00 0A 40 04 01 00 74 00 02                   | ...@...t..
+      {
+	uint16_t kicked_id = char_to_uint16(&buf[8]);
+	pthread_mutex_lock(&s->mutex);
+	for (int i = 0; i < s->max_players; i++) {
+	    if (s->p_l[i] && s->p_l[i]->player_id == kicked_id) {
+		pkt_size = uint32_to_char(1, &msg[8]);
+		pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PLAYER_KICK, SENDTOPLAYER, pkt_size);
+		write(s->p_l[i]->sock, msg, pkt_size);
+		pkt_size = 0;
+		break;
+	    }
+	}
+	pthread_mutex_unlock(&s->mutex);
+      }
+      break;
+
+    case SDO_GETBESTLAP:
+      {
+	uint32_t laptime = 0xffffffff;
+	if (s->session_info[0] != '\0') {
+	  int track_num = atoi(s->session_info);
+	  // TODO laptime = load_best_lap(s->db, track_num);
+	}
+	*(uint32_t *)&msg[8] = laptime;
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GETBESTLAP, SENDTOPLAYER, 4);
+      }
+      break;
+
     // TODO SDO_PLAYER_QUIT_RACE(void)
-    // TODO SDO_PLAYER_KICK
     // TODO SDO_DBUPDATE_STANDARD
     // 0000 | 00 00 14 40 04 02 00 89 02 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 00 00 00 00                                     | ....
-    // or
+    // 0010 | 00 00 00 00             players                 | ....
+    // or     lost
     // 0000 | 00 00 14 40 04 01 00 89 02 00 00 00 01 00 00 00 | ...@............
     // 0010 | 01 00 00 00                                     | ....
-    // TODO C7 ?
-    // 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
-    // 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
+    //        win
+    // TODO SDO_DBUPDATE_TRIAL
+    // 0000 | 00 00 1C 40 04 01 00 8A 00 00 00 00 01 00 00 00 | ...@............
+    // 0010 | 01 00 00 00 01 00 00 00 10 27 00 00             | .........'..
+    //                    win?        cash won ($10000)
+    // or
+    // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
+    // 0010 | 01 00 00 00 00 00 00 00 00 00 00 00             | ............
     //
+    // TODO C7 TRACKRECORDS?
+    // 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
+    //                                track#
+    // 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
+    //                                ?
+    // 0000 | 00 00 1C 40 04 01 00 C7 07 00 00 00 00 00 00 00 | ...@............
+    //                                track#
+    // 0010 | C2 EA 7F 00 00 00 00 00 46 DF 34 00             | .......F.4.
+    //        lap time                ?
 
     default:
       gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, recv_flag);
@@ -1008,7 +1065,6 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   int new_connection = 0;
   if (pl->udp_ready == 0 && pl->player_id != 0) {
     pl->udp_addr = *client;
-    pl->udp_ready = 1;
     new_connection = 1;
   }
 
@@ -1030,22 +1086,11 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	  case EVENT_UDPCONNECT:
 	    if (new_connection) /* s->max_players == s->current_nr_of_players) */ {
 		gs_info("Got UDPCONNECT");
+		pl->udp_ready = 1;
 		pkt_size = create_gameserver_udp_hdr(msg, cliSeq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
 		sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
 		       (struct sockaddr*)&pl->udp_addr,
 		       (socklen_t)sizeof(struct sockaddr_in));
-
-		for(i = 0; i < s->max_players; i++) {
-		    if (s->p_l[i] && s->p_l[i]->player_id != pl->player_id) {
-			memset(msg, 0, MAX_PKT_SIZE);
-			pkt_size = create_event_newplayer(&msg[8], s->p_l[i]->player_id, s->p_l[i]->username);
-			pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
-			write(pl->sock, msg, pkt_size);
-		    }
-		}
-		pkt_size = create_event_newplayer(&msg[8], pl->player_id, pl->username);
-		pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
-		send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
 
 		pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
 		pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWMASTER, SENDTOALLPLAYERS, pkt_size);
@@ -1146,7 +1191,7 @@ void *gameserver_udp_server_handler(void *data) {
 
     if (ret == 0) {
       gs_info("GAMESERVER%d - No UDP activity...exit", s_data->game_tcp_port);
-      if ( remove(s_data->pidfile) != 0 )
+      if (s_data->pidfile[0] != '\0' && remove(s_data->pidfile) != 0)
 	gs_error("Could not remove %s", s_data->pidfile);
 
       if (sqlite3_close(s_data->db) != SQLITE_OK) {
@@ -1162,7 +1207,7 @@ void *gameserver_udp_server_handler(void *data) {
       
       if (read_size < 0) {
 	gs_error("GAMESERVER%d - ERROR in recvfrom", s_data->game_tcp_port);
-	if ( remove(s_data->pidfile) != 0 )
+	if (s_data->pidfile[0] != '\0' && remove(s_data->pidfile) != 0)
 	  gs_error("Could not remove %s", s_data->pidfile);
 	break;
       }
@@ -1310,6 +1355,9 @@ int main (int argc, char *argv[]) {
       return 0;
     }
   }
+  else {
+    s_data.pidfile[0] = '\0';
+  }
 
   /* Populate server data struct */
   s_data.max_players = nr;
@@ -1327,6 +1375,7 @@ int main (int argc, char *argv[]) {
   pthread_mutexattr_t mutexattr;
   pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
   pthread_mutex_init(&s_data.mutex, &mutexattr);
+  s_data.session_info[0] = '\0';
     
   //OK - Connect to DB
   s_data.db = open_gs_db(s_data.server_db_path);

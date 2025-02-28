@@ -24,7 +24,7 @@ typedef struct {
 } player_t;
 
 typedef struct {
-  char session_name[MAX_UNAME_LEN];
+  char session_name[MAX_UNAME_LEN * 2];
   char session_game[MAX_UNAME_LEN];
   char session_gameversion[MAX_UNAME_LEN];
   char session_gameinfo[32];
