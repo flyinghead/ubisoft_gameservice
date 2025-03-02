@@ -563,7 +563,7 @@ int load_player_blob(sqlite3 *db, const char* username, const char *blobname, ui
       len = *size;
     else
       *size = len;
-    memcpy(data, sqlite3_column_blob(pStmt, 0), len);
+    memcpy(data, sqlite3_column_blob(pStmt, 0), (size_t)len);
     count = 1;
   } else {
     gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
@@ -671,7 +671,7 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
       len = *size;
     else
       *size = len;
-    memcpy(data, sqlite3_column_blob(pStmt, 0), len);
+    memcpy(data, sqlite3_column_blob(pStmt, 0), (size_t)len);
     count = 1;
   } else {
     gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
@@ -828,7 +828,7 @@ int load_initial_cash(sqlite3 *db)
 int load_motd(sqlite3 *db, char *text, int size)
 {
   const char *zSql = "SELECT MOTD FROM MOTD";
-  memset(text, 0, size);
+  memset(text, 0, (size_t)size);
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
 	gs_error("Prepare SQL error");
@@ -837,7 +837,7 @@ int load_motd(sqlite3 *db, char *text, int size)
   int ret = 0;
   if (sqlite3_step(pStmt) == SQLITE_ROW) {
 	ret = 1;
-	strncpy(text, (char *)sqlite3_column_text(pStmt, 0), size - 1);
+	strncpy(text, (char *)sqlite3_column_text(pStmt, 0), (size_t)(size - 1));
   }
   sqlite3_finalize(pStmt);
   return ret;
