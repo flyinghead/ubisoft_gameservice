@@ -180,6 +180,10 @@ uint32_t char_to_uint32(char* data) {
   return val;
 }
 
+uint32_t char_to_uint24(char* data) {
+  return (uint32_t)((uint8_t)data[0] << 16 | (uint8_t)data[1] << 8 | (uint8_t)data[2]);
+}
+
 uint16_t char_to_uint16(char* data) {
   uint16_t val = (uint16_t)((uint8_t)data[0] << 8 | (uint8_t)data[1]);
   return val;
@@ -191,6 +195,13 @@ int uint32_to_char(uint32_t data, char* msg) {
   msg[2] = (char)(data >> 8);
   msg[3] = (char)data;
   return 4;
+}
+
+int uint24_to_char(uint32_t data, char* msg) {
+  msg[0] = (char)(data >> 16);
+  msg[1] = (char)(data >> 8);
+  msg[2] = (char)data;
+  return 3;
 }
 
 int uint16_to_char(uint16_t data, char* msg) {

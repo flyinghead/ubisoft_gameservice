@@ -191,6 +191,7 @@
 #define SDO_GMGENERROR 0x90
 #define SDO_GETBESTLAP 0x91
 #define SDO_COMMIT 0x92
+#define SDO_TRACKRECORDS_UPDATE  0xC7
 #define SDO_TRACKRECORDS  0xC8
 
 void gs_error(const char* format, ... );
@@ -203,8 +204,10 @@ uint8_t * gs_encode_data(uint8_t * data, size_t size);
 uint32_t strlcpy(char *dst, const char *src, size_t size);
 #endif
 uint32_t char_to_uint32(char* data);
+uint32_t char_to_uint24(char* data);
 uint16_t char_to_uint16(char* data);
 int uint32_to_char(uint32_t data, char* msg);
+int uint24_to_char(uint32_t data, char* msg);
 int uint16_to_char(uint16_t data, char* msg);
 int bin8_to_msg(uint8_t value, char* msg);
 int bin16_to_msg(uint16_t value, char* msg);

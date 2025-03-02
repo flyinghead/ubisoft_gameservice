@@ -35,6 +35,14 @@
 #include "gs_sql.h"
 #include "../gs_common/gs_common.h"
 
+int serverSeq = 1;
+
+time_t get_time_ms() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
 void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;
   
@@ -82,17 +90,29 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
   }
 }
 
+void send_udp_player(player_t *player, char* msg, uint16_t pkt_size) {
+  uint24_to_char(player->udp_client_seq, &msg[3]);
+  uint16_to_char(player->udp_last_time, &msg[8]);
+  sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
+	     (struct sockaddr*)&player->udp_addr,
+	     (socklen_t)sizeof(struct sockaddr_in));
+}
+
 void send_udp_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;
- 
+
+  int reliable = (msg[0] & 0x80) << 16;
+  uint24_to_char(serverSeq | reliable, &msg[0]);
+  serverSeq++;
+  uint16_to_char((uint16_t)get_time_ms(), &msg[6]);
+
   switch(send_flag) {
   case SENDTOOTHERPLAYERS:
     pthread_mutex_lock(&s->mutex);
     for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i] && (s->p_l[i]->player_id != player_id))
-	sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-	       (struct sockaddr*)&s->p_l[i]->udp_addr,
-	       (socklen_t)sizeof(struct sockaddr_in));
+      player_t *player = s->p_l[i];
+      if (player && player->player_id != player_id)
+        send_udp_player(player, msg, pkt_size);
     }
     pthread_mutex_unlock(&s->mutex);
     break;;
@@ -110,10 +130,9 @@ void send_udp_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_
         
     pthread_mutex_lock(&s->mutex);
     for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i] && (s->p_l[i]->player_id == player_id)) {
-	sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-	       (struct sockaddr*)&s->p_l[i]->udp_addr,
-	       (socklen_t)sizeof(struct sockaddr_in));
+      player_t *player = s->p_l[i];
+      if (player && player == player_id) {
+        send_udp_player(player, msg, pkt_size);
 	break;
       }
     }
@@ -122,10 +141,9 @@ void send_udp_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_
   case SENDTOALLPLAYERS:
     pthread_mutex_lock(&s->mutex);
     for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i])
-	sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-	       (struct sockaddr*)&s->p_l[i]->udp_addr,
-	       (socklen_t)sizeof(struct sockaddr_in));
+      player_t *player = s->p_l[i];
+      if (player)
+	send_udp_player(player, msg, pkt_size);
     }
     pthread_mutex_unlock(&s->mutex);
     break;;
@@ -173,20 +191,15 @@ uint16_t create_gameserver_udp_hdr(char* msg, uint8_t msg_id, uint8_t msg_flag, 
 }
 */
 
-int serverSeq = 1;
-
 uint16_t create_gameserver_udp_hdr(char* msg, uint cliSeq, uint8_t msg_id, uint8_t msg_flag, uint16_t msg_size)
 {
-  msg[0] = (char)(serverSeq >> 16);
-  msg[1] = (char)(serverSeq >> 8);
-  msg[2] = (char)serverSeq;
+  /* Server sequence */
+  uint24_to_char(serverSeq, &msg[0]);
   serverSeq++;
-  msg[3] = (char)(cliSeq >> 16);
-  msg[4] = (char)(cliSeq >> 8);
-  msg[5] = (char)cliSeq;
-  memset(&msg[6], 0, 4);	// no times?
-  // clients send its time in ms in msg[6-7]
-  // sends something in msg[8-9]?? ~500
+  /* Last received client sequence */
+  uint24_to_char(cliSeq, &msg[3]);
+  /* Server time */
+  uint16_to_char((uint16_t)get_time_ms(), &msg[6]);
 
   msg[10] = (char)(msg_size + 4);
   msg[11] = (char)(0x10 | msg_flag);
@@ -280,6 +293,8 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
 
   pl->is_master = 0;
   pl->udp_ready = 0;
+  pl->udp_client_seq = 0;
+  pl->udp_last_time = 0;
   pl->player_id = 0;
   
   pthread_mutex_lock(&s->mutex);
@@ -453,7 +468,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
       /* New user added */
       s->current_nr_of_players = (uint8_t)(s->current_nr_of_players + 1);
-      pthread_mutex_unlock(&s->mutex);
      
       pkt_size = create_event_ownid(&msg[8], pl->player_id, s->current_nr_of_players, s->max_players);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_OWNID, SENDTOALLPLAYERS, pkt_size);
@@ -478,6 +492,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_event_newplayer(&msg[8], pl->player_id, pl->username);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
       send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
+      pthread_mutex_unlock(&s->mutex);
 
       pkt_size = 0;
       break;;
@@ -704,9 +719,9 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // 16 * 4 * 3 * 2 int -> circuits
       //   16 circuits: aspen1, aspen2, atkey1, atkey2, canada1, canada2, canada3, holly1, holly2,
       //                mexico, montreal1, montreal2, montreal3, nevada, newyork1, newyork2
-      //   4 modes?
+      //   4 car classes (A to D)
       //   3 radars
-      //   2 limits (normal, reverse)
+      //   2 limits (forward, reverse)
       {
 	int data[436] = {};
 	// Ranking bonuses
@@ -721,19 +736,19 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	data[6] = 9600;		// #2
 	data[7] = 4800;		// #3
 	data[8] = 2400;		// #4
-	data[9] = 1200;		// #5
+	data[9] = 1100;		// #5
 	// class B
 	data[10] = 20200;	// #1
 	data[11] = 12000;	// #2
 	data[12] = 6000;	// #3
-	data[13] = 3000;	// #4
-	data[14] = 1500;	// #5
+	data[13] = 3000;	// #4 confirmed
+	data[14] = 1200;	// #5 confirmed
 	// class A
-	data[15] = 25200;	// #1
-	data[16] = 15000;	// #2
-	data[17] = 7500;	// #3
-	data[18] = 3750;	// #4
-	data[19] = 1800;	// #5
+	data[15] = 25200;	// #1 confirmed
+	data[16] = 15000;	// #2 confirmed
+	data[17] = 7500;	// #3 confirmed
+	data[18] = 3750;	// #4 confirmed
+	data[19] = 1500;	// #5 confirmed
 
 	data[20] = 6661;	// TODO ?
 	data[21] = 5000;	// Paint job price
@@ -751,17 +766,17 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	data[31] = 100;		// % repair cost multiplier
 	data[32] = 100;		// % cash -> driver points
 
-	data[33] = 1500;	// race bonus 1 (per class)
-	data[34] = 1650;
-	data[35] = 1750;
-	data[36] = 1900;
-	data[37] = 1500;	// race bonus 2 (per class)
-	data[38] = 1650;
-	data[39] = 1750;
+	data[33] = 1300;	// race bonus 1 (per class)
+	data[34] = 1500;	// confirmed
+	data[35] = 1700;
+	data[36] = 1900;	// confirmed
+	data[37] = 1300;	// race bonus 2 (per class)
+	data[38] = 1500;
+	data[39] = 1700;
 	data[40] = 1900;
-	data[41] = 1500;	// race bonus 3 (per class)
-	data[42] = 1650;
-	data[43] = 1750;
+	data[41] = 1300;	// race bonus 3 (per class)
+	data[42] = 1500;
+	data[43] = 1700;
 	data[44] = 1900;
 
 	data[45] = 500;		// radar busted premiums (per class)
@@ -977,14 +992,51 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     case SDO_GETBESTLAP:
       {
-	uint32_t laptime = 0xffffffff;
+	gs_info("Got SDO_GETBESTLAP");
+	int laptime = -1;
 	if (s->session_info[0] != '\0') {
 	  int track_num = atoi(s->session_info);
 	  // TODO laptime = load_best_lap(s->db, track_num);
 	}
-	*(uint32_t *)&msg[8] = laptime;
+	*(int *)&msg[8] = laptime;
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GETBESTLAP, SENDTOPLAYER, 4);
       }
+      break;
+
+    case SDO_TRACKRECORDS_UPDATE:
+      {
+	gs_info("Got SDO_TRACKRECORDS_UPDATE");
+	int track_num = *(int *)&buf[8];
+	int laptime = *(int *)&buf[16];
+	int recordtime = -1; // TODO update_best_lap(s->db, track_num, laptime);
+	if (recordtime != -1) {
+	    // Reply if new personal or world record?
+	    *(int *)&msg[8] = laptime;
+	    *(int *)&msg[12] = recordtime;
+	    pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, 8);
+	}
+      }
+      break;
+
+    case SDO_STATS_POINT:
+      gs_info("Got SDO_STATS_POINT");
+      print_gs_data(buf, (unsigned)buf_len);
+      // 4 classes? * u8 count * char name[16] + u32 driverPoints
+      // count[0] ints
+      // count[1] ints
+      // count[2] ints
+      // count[3] ints
+      for (int i = 0; i < 4; i++) {
+	  msg[8 + i * 21] = 1;
+	  strcpy(&msg[8 + i * 21 + 1], "class A");
+	  msg[8 + i * 21 + 7] = 'A' + i;
+	  msg[8 + i * 21 + 17] = 1000 - (i + 1) * 10; // points
+      }
+      for (int i = 0; i < 4; i++) {
+	  msg[8 + 4 * 21 + i * 4] = i + 1; // corresponding rank (1+)
+      }
+      pkt_size = 4 * 21 + 4 * 4;
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_STATS_POINT, SENDTOPLAYER, pkt_size);
       break;
 
     // TODO SDO_PLAYER_QUIT_RACE(void)
@@ -1002,8 +1054,13 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     // or
     // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
     // 0010 | 01 00 00 00 00 00 00 00 00 00 00 00             | ............
+    // or
+    // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
+    // 0010 | 03 00 00 00 03 00 00 00 4E C3 00 00             | ........N...
+    //        # trials    won trials  cash won ($49998)
+
     //
-    // TODO C7 TRACKRECORDS?
+    // TODO SDO_TRACKRECORDS_UPDATE
     // 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
     //                                track#
     // 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
@@ -1047,7 +1104,6 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   uint8_t send_flag = 0;
   uint8_t msg_id = 0;
   char msg[MAX_PKT_SIZE];
-  int i = 0;
   
   if (buf_len < 10) {
     gs_info("GAMESERVER%d - Small UDP msg ignored (%d bytes)", s->game_tcp_port, buf_len);
@@ -1069,7 +1125,8 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   }
 
   /* Parse header */
-  unsigned cliSeq = (unsigned)(((buf[0] & 0xff) << 16) | ((buf[1] & 0xff) << 8) | (buf[2] & 0xff));
+  pl->udp_client_seq = char_to_uint24(&buf[0]);
+  pl->udp_last_time = char_to_uint16(&buf[6]);
   char *p = &buf[10];
   while (p - buf < buf_len)
   {
@@ -1087,7 +1144,8 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    if (new_connection) /* s->max_players == s->current_nr_of_players) */ {
 		gs_info("Got UDPCONNECT");
 		pl->udp_ready = 1;
-		pkt_size = create_gameserver_udp_hdr(msg, cliSeq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
+		pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
+		uint16_to_char(pl->udp_last_time, &msg[8]);
 		sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
 		       (struct sockaddr*)&pl->udp_addr,
 		       (socklen_t)sizeof(struct sockaddr_in));
@@ -1103,11 +1161,16 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    break;
 
 	  case EVENT_RATE:
-	    pkt_size = create_gameserver_udp_hdr(msg, cliSeq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
-	    memcpy(&msg[14], p - 4, 4);
-	    sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-		   (struct sockaddr*)&pl->udp_addr,
-		   (socklen_t)sizeof(struct sockaddr_in));
+	    {
+	      uint32_t rate = char_to_uint32(p - 4);
+	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
+	      uint32_to_char(rate, &msg[14]);
+	      pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
+	      uint16_to_char(pl->udp_last_time, &msg[8]);
+	      sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
+		     (struct sockaddr*)&pl->udp_addr,
+		     (socklen_t)sizeof(struct sockaddr_in));
+	    }
 	    break;
 
 	  case SDO_DUMMY:
