@@ -57,14 +57,23 @@ int file_exists(char* filename) {
 
 uint16_t get_available_gameserver_port(server_data_t *s, session_t *sess) {
   int i;
-  char pidfile[25];
+  char pidfile[32];
   uint16_t port = 0;
   
   for( i = (int)sess->session_id; i < (int)(s->start_session_id + s->max_sessions); i++ ) {
     port = (uint16_t)(GS_PORT_OFFSET + i);
     sprintf(pidfile, "/tmp/gameserver%d.pid", port);
-    if ( file_exists(pidfile) != 0) {
-      return port;
+    if (file_exists(pidfile) != 0) {
+      /* Make sure we don't have a live session using this port
+       * to prevent any race condition on the pid file
+       */
+      for (int j = 0; j < s->max_sessions; j++)
+	if (s->s_l[j] && s->s_l[j]->session_gameport == port && s->s_l[j] != sess) {
+	  port = 0;
+	  break;
+	}
+      if (port != 0)
+        return port;
     }	    
   }
 
@@ -589,15 +598,10 @@ int add_server_session(server_data_t *s,
     if(!(s->s_l[i])) {
       s->s_l[i] = sess;
       sess->session_id = s->start_session_id + (uint32_t)i;
-      if (s->server_type == SDO_SERVER) {
+      sess->session_gameport = get_available_gameserver_port(s, sess);
+      if (sess->session_gameport == 0) {
 	sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
-      }
-      else {
-        sess->session_gameport = get_available_gameserver_port(s, sess);
-        if (sess->session_gameport == 0) {
-	  sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
-	  gs_error("Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
-        }
+	gs_error("Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
       }
       pthread_mutex_unlock(&s->mutex);
       gs_info("Added session %s with groupid: %d and port: %d", sess->session_name, sess->session_id, sess->session_gameport);
@@ -641,7 +645,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
   buf[buf_len] = '\0';
   //Parse header
   if (buf_len < 6) {
-    gs_info("Length of packet is less then 6 bytes...[SKIP]");
+    gs_info("[lobby] Length of packet is less then 6 bytes...[SKIP]");
     return 0;
   }
 
@@ -649,47 +653,43 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
   recv_size = char_to_uint16(&buf[1]);
   
   if(recv_size > buf_len) {
-    gs_info("<- Packet size %d is greater then buffer size %d", recv_size, buf_len);
+    gs_info("[lobby] Packet size %d is greater than buffer size %d", recv_size, buf_len);
+    print_gs_data(buf, (long unsigned int)buf_len);
     return 0;
   }
 
-  if (recv_flag != SDO_DBUPDATE_FULLSTATS && recv_flag != SDO_STATS_POINT 	// TODO
-		  && recv_flag != SDO_STATS_CASH && recv_flag != SDO_STATS_STANDARDAVG
-		  && recv_flag != SDO_STATS_STANDARDWIN)
-  {
-    //Jump the header
-    pos = pos + 6;
-    while (pos < recv_size) {
-      if (nr_s_parsed == 256 || nr_b_parsed == 256) {
-	return 0;
+  //Jump the header
+  pos = pos + 6;
+  while (pos < recv_size) {
+    if (nr_s_parsed == 256 || nr_b_parsed == 256) {
+      return 0;
+    }
+    switch (buf[pos]) {
+    case 's':
+      pos++;
+      tok_array[nr_s_parsed] = &buf[pos];
+      pos += (int)(strlen(tok_array[nr_s_parsed]));
+      nr_s_parsed++;
+      break;;
+    case 'b':
+      pos++;
+      if (pos + 4 > buf_len) {
+	gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
+	print_gs_data(buf, (long unsigned int)buf_len);
+	  return 0;
       }
-      switch (buf[pos]) {
-      case 's':
-	pos++;
-	tok_array[nr_s_parsed] = &buf[pos];
-	pos += (int)(strlen(tok_array[nr_s_parsed]));
-	nr_s_parsed++;
-	break;;
-      case 'b':
-	pos++;
-	if (pos + 4 > buf_len) {
-	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
-	  print_gs_data(buf, (long unsigned int)buf_len);
-	    return 0;
-	}
-	binLen = char_to_uint32(&buf[pos]);
-	if ((uint32_t)(pos + 4) + binLen > buf_len) {
-	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
-	  print_gs_data(buf, (long unsigned int)buf_len);
-	    return 0;
-	}
-	memcpy(&byte_array[nr_b_parsed], &buf[pos+4], binLen);
-	nr_b_parsed++;
-	break;;
-      default:
-	pos++;
-	break;;
+      binLen = char_to_uint32(&buf[pos]);
+      if ((uint32_t)(pos + 4) + binLen > buf_len) {
+	gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
+	print_gs_data(buf, (long unsigned int)buf_len);
+	  return 0;
       }
+      memcpy(&byte_array[nr_b_parsed], &buf[pos+4], binLen);
+      nr_b_parsed++;
+      break;;
+    default:
+      pos++;
+      break;;
     }
   }
 
@@ -715,11 +715,11 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d values from JOINSESSION packet needs 2", nr_b_parsed);
       return 0;
     }
+
     groupid = byte_array[0];
     sess = find_server_session(s, groupid);
     gs_info("JOINSESSION %s %s groupid=%d %d session=%p", tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
     print_gs_data(buf, (long unsigned int)buf_len);
-
 
     /* Joining a session */
     if (sess != NULL) {

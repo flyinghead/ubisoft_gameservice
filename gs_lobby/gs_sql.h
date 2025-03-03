@@ -21,3 +21,7 @@ int load_price_list(sqlite3 *db, int type, uint32_t *prices, int size);
 int load_game_defines(sqlite3 *db, int *values, int size);
 int load_initial_cash(sqlite3 *db);
 int load_motd(sqlite3 *db, char *text, int size);
+int update_std_race(sqlite3 *db, char *username, int races, int wins);
+int update_trial_race(sqlite3 *db, char *username, int races, int trials, int wins, int cash_won);
+int update_vendetta_race(sqlite3 *db, char *username, int races, int wins);
+int update_record(sqlite3 *db, char *username, int track, int mode, int lap_time, int max_speed);

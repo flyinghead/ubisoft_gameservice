@@ -290,14 +290,15 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
   buf[buf_len] = '\0';
   //Parse header
   if (buf_len < 6) {
-    gs_info("Length of packet is less then 6 bytes...[SKIP]");
+    gs_info("[waitmodule] Length of packet is less then 6 bytes...[SKIP]");
     return 0;
   }
 
   recv_flag = (uint8_t)buf[4];
   recv_size = char_to_uint16(&buf[1]);
-  if(recv_size > buf_len) {
-    gs_info("<- Packet size %d is greater then buffer size %d", recv_size, buf_len);
+  if (recv_size > buf_len) {
+    gs_info("[waitmodule] Packet size %d is greater then buffer size %d", recv_size, buf_len);
+    print_gs_data(buf, (long unsigned int)buf_len);
     return 0;
   }
 

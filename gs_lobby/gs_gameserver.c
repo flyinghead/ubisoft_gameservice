@@ -31,11 +31,13 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "gs_gameserver.h"
 #include "gs_sql.h"
 #include "../gs_common/gs_common.h"
 
 uint32_t serverSeq = 1;
+server_data_t server_data;
 
 time_t get_time_ms() {
   struct timespec now;
@@ -351,9 +353,6 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   free(pl);
   if (s->current_nr_of_players == 0) {
     gs_info("GAMESERVER%d - Server is empty...exit", s->game_tcp_port);
-
-    if (s->pidfile[0] != '\0' && remove(s->pidfile) != 0)
-      gs_error("Could not remove %s", s->pidfile);
 
     if (sqlite3_close(s->db) != SQLITE_OK) {
       gs_info("DB is busy during closing");
@@ -867,7 +866,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     case SDO_DBUPDATE_PLAYERSTAT:
       gs_info("Got DBUPDATE_PLAYERSTAT");
-      // TODO it's called 3 times in a row. is it expecting a reply?
       update_player_data(s->db, pl->username, (const uint8_t *)&buf[8], 41);
       pkt_size = 0;
       break;
@@ -885,8 +883,32 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	msg[9] = buf[9];
 	int size = MAX_PKT_SIZE - 10;
 	load_player_fullstats(s->db, pl->username, (uint8_t *)&msg[10], &size);
-	if (size != 0)
+	if (size != 0) {
+	  size = 473;	// Should be 473 bytes
 	  size += 2;
+	  /*
+	  *(int *)&msg[410] = 11;
+	  *(int *)&msg[414] = 12;
+	  *(int *)&msg[418] = 13;	// std races
+	  *(int *)&msg[422] = 14;	// 1st place victories
+	  *(int *)&msg[426] = 16;	// trial races
+	  *(int *)&msg[430] = 20;	// trial bets -> trial avg = won / bets
+	  *(int *)&msg[434] = 20;	// trial won
+	  *(int *)&msg[438] = 18;	// cash won in trial
+	  *(int *)&msg[442] = 19;	// vendetta races -> vendetta avg = cars won / races
+	  *(int *)&msg[446] = 20;	// cars won
+	  *(int *)&msg[450] = 6;
+	  *(int *)&msg[454] = 7;
+	  *(int *)&msg[458] = 8;
+	  *(int *)&msg[462] = 9;
+	  */
+	  *(int *)&msg[466] = 1;	// std avg multiplier?
+	  /*
+//	  *(int *)&msg[470] = 26;	// 5 bytes? ff ff ff ff ff
+	  *(int *)&msg[475] = 0;	// favorite track mode
+	  *(int *)&msg[479] = 7;	// favorite track
+	  */
+	}
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_FULLSTATS, SENDTOPLAYER, (uint16_t)size);
       }
       break;
@@ -1006,11 +1028,19 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     case SDO_TRACKRECORDS_UPDATE:
       {
 	gs_info("Got SDO_TRACKRECORDS_UPDATE");
-	int track_num = *(int *)&buf[8];
+	print_gs_data(buf, (unsigned)buf_len);
+	// 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
+	//                                track#      mode
+	// 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
+	//                                max speed?
+	// 0000 | 00 00 1C 40 04 01 00 C7 07 00 00 00 00 00 00 00 | ...@............
+	//                                track#      mode
+	// 0010 | C2 EA 7F 00 00 00 00 00 46 DF 34 00             | .......F.4.
+	//        lap time                max speed?
 	int laptime = *(int *)&buf[16];
-	int recordtime = -1; // TODO update_best_lap(s->db, track_num, laptime);
+	int recordtime = update_record(s->db, pl->username, *(int *)&buf[8], *(int *)&buf[12], laptime, *(int *)&buf[24]);
 	if (recordtime != -1) {
-	    // Reply if new personal or world record?
+	    // Reply if new personal or world record? doesn't look like it
 	    *(int *)&msg[8] = laptime;
 	    *(int *)&msg[12] = recordtime;
 	    pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, 8);
@@ -1018,57 +1048,174 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       }
       break;
 
-    case SDO_STATS_POINT:
-      gs_info("Got SDO_STATS_POINT");
+    case SDO_TRACKRECORDS:
+      gs_info("Got SDO_TRACKRECORDS");
       print_gs_data(buf, (unsigned)buf_len);
-      // 4 classes? * u8 count * char name[16] + u32 driverPoints
+      // aspen winter normal:
+      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 00 00
+      // holly  normal:
+      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 00
+      // holly reverse:
+      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 01
+      // holly mirror:
+      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 02
+      // holly reverse/mirror:
+      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 03
+
+      // 3 * {	// best race time, best speed, best lap time
+      //    u8 count			// top 3
+      //       char[16] name
+      //       u32 time/speed
+      //    u8 count			// your best (1)
+      //       char[16] name
+      //       u32 time
+      // }
+      {
+	int class = buf[8];	// 4: all, 0: class D, 1: class C, ...
+	int track = buf[12];
+	int mode = buf[13];	// 0: normal, 1: reverse, 2:mirror, 3:reverse/mirror
+	int idx = 8;
+	for (int i = 0; i < 3; i++)
+	  {
+	    msg[idx++] = 3;
+	    strcpy(&msg[idx], "Player 1");
+	    idx += 16;
+	    *(int *)&msg[idx] = 0x2D1234;
+	    idx += 4;
+	    strcpy(&msg[idx], "Player 2");
+	    idx += 16;
+	    *(int *)&msg[idx] = 0x2D2234;
+	    idx += 4;
+	    strcpy(&msg[idx], "Player 3");
+	    idx += 16;
+	    *(int *)&msg[idx] = 0x2D3234;
+	    idx += 4;
+
+	    msg[idx++] = 1;
+	    strcpy(&msg[idx], "Me");
+	    idx += 16;
+	    *(int *)&msg[idx] = 0x34df46;	// 2d4234 -> 101.83 mph (/29127.7), 34df46 -> 118.96 mph (/29127.7)
+	    idx += 4;
+	  }
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, (uint16_t)(idx - 8));
+      }
+      break;
+
+    case SDO_STATS_POINT:
+    case SDO_STATS_CASH:
+    case SDO_STATS_STANDARDAVG:
+    case SDO_STATS_STANDARDWIN:
+    case SDO_STATS_TRIALAVG:	// %: 990 is 0.099%
+    case SDO_STATS_TRIALWIN:
+    case SDO_STATS_VENDETTAAVG:	// %: 990 is 0.099%
+    case SDO_STATS_VENDETTAWIN:
+      gs_info("Got SDO_STATS_xxx %02x", recv_flag);
+      print_gs_data(buf, (unsigned)buf_len);
+      // 4 groups? * u8 count (< 10) * char name[16] + u32 driverPoints
+      // groups: top 10, 5 players before, current player, 5 players after
       // count[0] ints
       // count[1] ints
       // count[2] ints
       // count[3] ints
-      for (int i = 0; i < 4; i++) {
-	  msg[8 + i * 21] = 1;
-	  strcpy(&msg[8 + i * 21 + 1], "class A");
-	  msg[8 + i * 21 + 7] = (char)('A' + i);
-	  *(int *)&msg[8 + i * 21 + 17] = 1000 - (i + 1) * 10; // points
+      {
+	int class = buf[8];	// 4: all, 0: class D, 1: class C, ...
+
+	int idx = 8;
+	msg[idx++] = 10;
+	for (int i = 0; i < 10; i++) {
+	    strcpy(&msg[idx], "Player 1");
+	    msg[idx + 7] = (char)('A' + i);
+	    *(int *)&msg[idx + 16] = 1000 - (i + 1) * 10; // points
+	    idx += 20;
+	}
+	msg[idx++] = 5;	// The order of this group is inverted??? wtaf?
+	strcpy(&msg[idx], "Player 5 before");
+	idx += 16;
+	*(int *)&msg[idx] = 205;
+	idx += 4;
+	strcpy(&msg[idx], "Player 4 before");
+	idx += 16;
+	*(int *)&msg[idx] = 204;
+	idx += 4;
+	strcpy(&msg[idx], "Player 3 before");
+	idx += 16;
+	*(int *)&msg[idx] = 203;
+	idx += 4;
+	strcpy(&msg[idx], "Player 2 before");
+	idx += 16;
+	*(int *)&msg[idx] = 202;
+	idx += 4;
+	strcpy(&msg[idx], "Player before");
+	idx += 16;
+	*(int *)&msg[idx] = 201;
+	idx += 4;
+
+	msg[idx++] = 1;
+	strcpy(&msg[idx], "FLY");
+	idx += 16;
+	*(int *)&msg[idx] = 200;
+	idx += 4;
+
+	msg[idx++] = 5;
+	strcpy(&msg[idx], "Player after");
+	idx += 16;
+	*(int *)&msg[idx] = 199;
+	idx += 4;
+	strcpy(&msg[idx], "Player after 2");
+	idx += 16;
+	*(int *)&msg[idx] = 198;
+	idx += 4;
+	strcpy(&msg[idx], "Player after 3");
+	idx += 16;
+	*(int *)&msg[idx] = 197;
+	idx += 4;
+	strcpy(&msg[idx], "Player after 4");
+	idx += 16;
+	*(int *)&msg[idx] = 196;
+	idx += 4;
+	strcpy(&msg[idx], "Player after 5");
+	idx += 16;
+	*(int *)&msg[idx] = 195;
+	idx += 4;
+
+	for (int i = 0; i < 10; i++) {
+	    *(int *)&msg[idx] = i + 1; // corresponding rank (1+)
+	    idx += 4;
+	}
+	for (int i = 0; i < 11; i++) {
+	    *(int *)&msg[idx] = i + 95; // corresponding rank (1+)
+	    idx += 4;
+	}
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_STATS_POINT, SENDTOPLAYER, (uint16_t)(idx - 8));
       }
-      for (int i = 0; i < 4; i++) {
-	  msg[8 + 4 * 21 + i * 4] = (char)(i + 1); // corresponding rank (1+)
-      }
-      pkt_size = 4 * 21 + 4 * 4;
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_STATS_POINT, SENDTOPLAYER, pkt_size);
+      break;
+
+    case SDO_DBUPDATE_STANDARD:
+      // 0000 | 00 00 14 40 04 01 00 89 02 00 00 00 01 00 00 00 | ...@............
+      // 0010 | 01 00 00 00             ?           race count  | ....
+      //        wins
+      gs_info("Got SDO_DBUPDATE_STANDARD");
+      print_gs_data(buf, (unsigned)buf_len);
+      update_std_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
+      break;
+
+    case SDO_DBUPDATE_TRIAL:
+      // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
+      //                                            trial races
+      // 0010 | 03 00 00 00 03 00 00 00 4E C3 00 00             | ........N...
+      //        # trials    won trials  cash won ($49998)
+      gs_info("Got SDO_DBUPDATE_TRIAL");
+      print_gs_data(buf, (unsigned)buf_len);
+      update_trial_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16], *(int *)&buf[20], *(int *)&buf[24]);
+      break;
+
+    case SDO_DBUPDATE_VENDETTA:
+      gs_info("Got SDO_DBUPDATE_VENDETTA");
+      print_gs_data(buf, (unsigned)buf_len);
+      update_vendetta_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
       break;
 
     // TODO SDO_PLAYER_QUIT_RACE(void)
-    // TODO SDO_DBUPDATE_STANDARD
-    // 0000 | 00 00 14 40 04 02 00 89 02 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 00 00 00 00             players                 | ....
-    // or     lost
-    // 0000 | 00 00 14 40 04 01 00 89 02 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 01 00 00 00                                     | ....
-    //        win
-    // TODO SDO_DBUPDATE_TRIAL
-    // 0000 | 00 00 1C 40 04 01 00 8A 00 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 01 00 00 00 01 00 00 00 10 27 00 00             | .........'..
-    //                    win?        cash won ($10000)
-    // or
-    // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 01 00 00 00 00 00 00 00 00 00 00 00             | ............
-    // or
-    // 0000 | 00 00 1C 40 04 02 00 8A 00 00 00 00 01 00 00 00 | ...@............
-    // 0010 | 03 00 00 00 03 00 00 00 4E C3 00 00             | ........N...
-    //        # trials    won trials  cash won ($49998)
-
-    //
-    // TODO SDO_TRACKRECORDS_UPDATE
-    // 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
-    //                                track#
-    // 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
-    //                                ?
-    // 0000 | 00 00 1C 40 04 01 00 C7 07 00 00 00 00 00 00 00 | ...@............
-    //                                track#
-    // 0010 | C2 EA 7F 00 00 00 00 00 46 DF 34 00             | .......F.4.
-    //        lap time                ?
 
     default:
       gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, recv_flag);
@@ -1254,9 +1401,6 @@ void *gameserver_udp_server_handler(void *data) {
 
     if (ret == 0) {
       gs_info("GAMESERVER%d - No UDP activity...exit", s_data->game_tcp_port);
-      if (s_data->pidfile[0] != '\0' && remove(s_data->pidfile) != 0)
-	gs_error("Could not remove %s", s_data->pidfile);
-
       if (sqlite3_close(s_data->db) != SQLITE_OK) {
 	gs_info("DB is busy during closing");
       }
@@ -1270,8 +1414,6 @@ void *gameserver_udp_server_handler(void *data) {
       
       if (read_size < 0) {
 	gs_error("GAMESERVER%d - ERROR in recvfrom", s_data->game_tcp_port);
-	if (s_data->pidfile[0] != '\0' && remove(s_data->pidfile) != 0)
-	  gs_error("Could not remove %s", s_data->pidfile);
 	break;
       }
       
@@ -1354,15 +1496,24 @@ void *gs_gameserver_client_handler(void *data) {
   return 0;
 }
 
+void signal_handler(int s) {
+  gs_info("GAMESERVER%d - Caught signal %d. Exiting", server_data.game_tcp_port, s);
+  exit(0);
+}
+
+void delete_pidfile() {
+  if (remove(server_data.pidfile) != 0)
+    gs_error("GAMESERVER%d - Could not remove %s", server_data.game_tcp_port, server_data.pidfile);
+}
+
 int main (int argc, char *argv[]) {
-  server_data_t s_data = { 0 };
-  int socket_desc , client_sock , c, optval, i, opt;
+  int socket_desc , client_sock , c, optval, opt;
   struct sockaddr_in server = { 0 }, client = { 0 };
   uint16_t port = 0;
   uint8_t nr = 0, server_type = 0;
   char *master = NULL, *db_path = NULL;
   
-  s_data.lobby_pipe = -1;
+  server_data.lobby_pipe = -1;
   while ((opt = getopt (argc, argv, "p:n:m:d:t:i:")) != -1) {
     switch (opt) {
     case 'p':
@@ -1389,12 +1540,12 @@ int main (int argc, char *argv[]) {
       server_type = (uint8_t)str2int(optarg);
       break;
     case 'i':
-      s_data.lobby_pipe = str2int(optarg);
+      server_data.lobby_pipe = str2int(optarg);
       break;
     }
   }
   
-  if (port == 0 || nr == 0 || server_type == 0 || s_data.lobby_pipe == -1) {
+  if (port == 0 || nr == 0 || server_type == 0 || server_data.lobby_pipe == -1) {
     gs_info("GAMESERVER - Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master> -t <SERVER_TYPE> -i <pipefd>");
     return 0;
   }
@@ -1402,60 +1553,60 @@ int main (int argc, char *argv[]) {
     gs_info("GAMESERVER - Missing Master username");
     return 0;
   } else {
-    strlcpy(s_data.master, master, sizeof(s_data.master));
+    strlcpy(server_data.master, master, sizeof(server_data.master));
   }
   if (db_path == NULL) {
     gs_info("GAMESERVER - Missing DB PATH");
     return 0;
   } else {
-    strlcpy(s_data.server_db_path, db_path, sizeof(s_data.server_db_path));
+    strlcpy(server_data.server_db_path, db_path, sizeof(server_data.server_db_path));
   }
+  signal(SIGPIPE, signal_handler);
+  signal(SIGTERM, signal_handler);
+  signal(SIGHUP, signal_handler);
+  signal(SIGINT, signal_handler);
 
-  if (server_type != SDO_SERVER) {
-    sprintf(s_data.pidfile, "/tmp/gameserver%d.pid", port);
-    if ( creat( s_data.pidfile, 644 ) < 0 ) {
-      gs_error("Could not create gameserver file %s", s_data.pidfile);
-      return 0;
-    }
+  sprintf(server_data.pidfile, "/tmp/gameserver%d.pid", port);
+  int fd;
+  if ((fd = creat(server_data.pidfile, 644)) < 0) {
+    gs_error("Could not create gameserver file %s", server_data.pidfile);
+    return 0;
   }
-  else {
-    s_data.pidfile[0] = '\0';
-  }
+  close(fd);
+  atexit(delete_pidfile);
 
   /* Populate server data struct */
-  s_data.max_players = nr;
-  s_data.p_l = calloc((size_t)nr, sizeof(server_data_t *));
-  for (i = 0; i < s_data.max_players; i++)
-    s_data.p_l[i] = NULL;
-  s_data.game_tcp_port = port;
-  s_data.game_udp_port = (uint16_t)(port + 2);
-  s_data.current_nr_of_players = 0;
+  server_data.max_players = nr;
+  server_data.p_l = calloc((size_t)nr, sizeof(player_t *));
+  server_data.game_tcp_port = port;
+  server_data.game_udp_port = (uint16_t)(port + 2);
+  server_data.current_nr_of_players = 0;
   if (server_type == SDO_SERVER)
-    s_data.master_id = 1;
+    server_data.master_id = 1;
   else
-    s_data.master_id = (uint16_t)(s_data.max_players + 2);
-  s_data.server_type = server_type;
+    server_data.master_id = (uint16_t)(server_data.max_players + 2);
+  server_data.server_type = server_type;
   pthread_mutexattr_t mutexattr;
   pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_init(&s_data.mutex, &mutexattr);
-  s_data.session_info[0] = '\0';
+  pthread_mutex_init(&server_data.mutex, &mutexattr);
+  server_data.session_info[0] = '\0';
     
   //OK - Connect to DB
-  s_data.db = open_gs_db(s_data.server_db_path);
-  if (s_data.db == NULL) {
+  server_data.db = open_gs_db(server_data.server_db_path);
+  if (server_data.db == NULL) {
     gs_error("Could not connect to database");
     return 0;
   }
 
-  clock_gettime(CLOCK_REALTIME, &s_data.start_time);
+  clock_gettime(CLOCK_REALTIME, &server_data.start_time);
  
   gs_info("GAMESERVER%d - Starting game server with TCP-Port: %d UDP-port: %d Master: %s Max Players: %d DB PATH: %s SERVER TYPE: %d",
-	  s_data.game_tcp_port, s_data.game_tcp_port, s_data.game_udp_port, s_data.master, s_data.max_players, s_data.server_db_path, s_data.server_type);
+	  server_data.game_tcp_port, server_data.game_tcp_port, server_data.game_udp_port, server_data.master, server_data.max_players, server_data.server_db_path, server_data.server_type);
   
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
   if (socket_desc == -1) {
-    gs_info("GAMESERVER%d - Could not create socket", s_data.game_tcp_port);
-    sqlite3_close(s_data.db);
+    gs_info("GAMESERVER%d - Could not create socket", server_data.game_tcp_port);
+    sqlite3_close(server_data.db);
     return 0;
   }
 
@@ -1464,11 +1615,11 @@ int main (int argc, char *argv[]) {
   
   server.sin_family = AF_INET;
   server.sin_addr.s_addr = INADDR_ANY;
-  server.sin_port = htons( s_data.game_tcp_port );
+  server.sin_port = htons(server_data.game_tcp_port);
   
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
     gs_error("Bind failed. Error");
-    sqlite3_close(s_data.db);
+    sqlite3_close(server_data.db);
     return 0;
   }
 
@@ -1478,37 +1629,35 @@ int main (int argc, char *argv[]) {
   c = sizeof(struct sockaddr_in);
 
   pthread_t thread_id_udp;
-  if( pthread_create( &thread_id_udp , NULL ,  gameserver_udp_server_handler , (void*)&s_data) < 0) {
+  if( pthread_create(&thread_id_udp, NULL, gameserver_udp_server_handler, (void*)&server_data) < 0) {
     perror("Could not create thread");
-    sqlite3_close(s_data.db);
+    sqlite3_close(server_data.db);
     return 0;
   }
   pthread_detach(thread_id_udp);
     
-  while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
+  while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) >= 0) {
     //Store player data
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
-    pl->server = &s_data;
-    if (!add_gameserver_player(&s_data, pl)) {
+    pl->server = &server_data;
+    if (!add_gameserver_player(&server_data, pl)) {
       free(pl);
-      return 0;
+      close(client_sock);
+      continue;
     }
     
-    if( pthread_create( &thread_id , NULL ,  gs_gameserver_client_handler , (void*)pl) < 0) {
-      gs_error("GAMESERVER%d - Could not create thread", s_data.game_tcp_port);
-      sqlite3_close(s_data.db);
-      return 0;
+    if (pthread_create(&thread_id, NULL, gs_gameserver_client_handler, (void*)pl) < 0) {
+      gs_error("GAMESERVER%d - Could not create thread", server_data.game_tcp_port);
+      break;
     }
     pthread_detach(thread_id);
   }
-  
-  if (client_sock < 0) {
-    gs_error("GAMESERVER%d - Accept failed", s_data.game_tcp_port);
-    sqlite3_close(s_data.db);
-    return 0;
-  }
-  
+
+  if (client_sock < 0)
+    gs_error("GAMESERVER%d - Accept failed", server_data.game_tcp_port);
+  sqlite3_close(server_data.db);
+
   return 0;
 }

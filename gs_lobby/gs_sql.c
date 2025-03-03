@@ -579,8 +579,58 @@ int load_player_data(sqlite3 *db, const char* username, uint8_t *data, int *size
   return load_player_blob(db, username, "PLAYERDATA", data, size);
 }
 
-int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int *size) {
-  return load_player_blob(db, username, "FULLSTATS", data, size);
+int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int *size)
+{
+  const char *zSql = "SELECT FULLSTATS, STD_RACES, STD_WINS, TRIAL_RACES, TRIAL_COUNT, TRIAL_WINS, TRIAL_CASH, VENDETTA_WINS, VENDETTA_COUNT "
+      "from PLAYER_DATA WHERE USERNAME = trim(?)";
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    gs_error("Prepare SQL error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind text failed error: %d", rc);
+    *size = 0;
+    return 0;
+  }
+
+  int count;
+  rc = sqlite3_step(pStmt);
+  //Getting no lines
+  if (rc == SQLITE_DONE) {
+    gs_info("Username: %s is missing player record in DB", username);
+    *size = 0;
+    count = 2;
+  } else if (rc == SQLITE_ROW) {
+    int len = sqlite3_column_bytes(pStmt, 0);
+    if (len > *size)
+      len = *size;
+    else
+      *size = len;
+    memcpy(data, sqlite3_column_blob(pStmt, 0), (size_t)len);
+    *(int *)&data[408] = sqlite3_column_int(pStmt, 1);	// std races
+    *(int *)&data[412] = sqlite3_column_int(pStmt, 2);	// 1st place wins
+    *(int *)&data[416] = sqlite3_column_int(pStmt, 3);	// trial races
+    *(int *)&data[420] = sqlite3_column_int(pStmt, 4);	// trial bets
+    *(int *)&data[424] = sqlite3_column_int(pStmt, 5);	// trials won
+    *(int *)&data[428] = sqlite3_column_int(pStmt, 6);	// trial cash won
+    *(int *)&data[432] = sqlite3_column_int(pStmt, 7);	// vendetta races
+    *(int *)&data[436] = sqlite3_column_int(pStmt, 8);	// vendetta wins
+    count = 1;
+  } else {
+    gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
+    *size = 0;
+    count = 0;
+  }
+
+  sqlite3_finalize(pStmt);
+  return count;
 }
 
 int update_player_blob(sqlite3 *db, const char* username, const char *blobname, const uint8_t *data, int size)
@@ -620,8 +670,66 @@ int update_player_blob(sqlite3 *db, const char* username, const char *blobname, 
   return 1;
 }
 
-int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, int size) {
-  return update_player_blob(db, username, "PLAYERDATA", data, size);
+int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, int size)
+{
+  char *zSql = "UPDATE PLAYER_DATA SET PLAYERDATA = ?, CLASS = ?, DRIVING_POINTS = ?, CASH = ? WHERE USERNAME = trim(?)";
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK ) {
+    gs_error("Prepare SQL error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind blob failed error: %d", rc);
+    return 0;
+  }
+  int driving_points = *(int *)&data[0];
+  int class = 0;
+  if (driving_points >= 4000000)
+    class = 3;
+  else if (driving_points >= 800000)
+    class = 2;
+  else if (driving_points >= 160000)
+    class = 1;
+  rc = sqlite3_bind_int(pStmt, 2, class);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind int2 failed error: %d", rc);
+    return 0;
+  }
+  rc = sqlite3_bind_int(pStmt, 3, driving_points);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind int3 failed error: %d", rc);
+    return 0;
+  }
+  rc = sqlite3_bind_int(pStmt, 4, *(int *)&data[4]);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind int4 failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_bind_text(pStmt, 5, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(pStmt);
+    gs_error("Bind text failed error: %d", rc);
+    return 0;
+  }
+
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    sqlite3_finalize(pStmt);
+    return 0;
+  }
+  sqlite3_finalize(pStmt);
+
+  return 1;
 }
 
 int update_player_fullstats(sqlite3 *db, const char* username, const uint8_t *data, int size) {
@@ -842,3 +950,228 @@ int load_motd(sqlite3 *db, char *text, int size)
   sqlite3_finalize(pStmt);
   return ret;
 }
+
+int update_std_race(sqlite3 *db, char *username, int races, int wins)
+{
+  const char *zSql = "UPDATE PLAYER_DATA SET STD_RACES = ?, STD_WINS = ? WHERE USERNAME = trim(?)";
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
+      gs_error("Prepare SQL error");
+      return 0;
+  }
+  int ret = 0;
+  int rc = sqlite3_bind_int(pStmt, 1, races);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int1 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_int(pStmt, 2, wins);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int2 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_text(pStmt, 3, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind text failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    goto exit;
+  }
+  ret = 1;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int update_trial_race(sqlite3 *db, char *username, int races, int trials, int wins, int cash_won)
+{
+  const char *zSql = "UPDATE PLAYER_DATA SET "
+      "TRIAL_RACES = ?, "
+      "TRIAL_WINS = ?, "
+      "TRIAL_COUNT = ?, "
+      "TRIAL_CASH = ? "
+      "WHERE USERNAME = trim(?)";
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
+      gs_error("Prepare SQL error");
+      return 0;
+  }
+  int ret = 0;
+  int rc = sqlite3_bind_int(pStmt, 1, races);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int1 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_int(pStmt, 2, wins);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int2 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_int(pStmt, 3, trials);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int3 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_int(pStmt, 4, cash_won);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int4 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_text(pStmt, 5, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind text failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    goto exit;
+  }
+  ret = 1;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int update_vendetta_race(sqlite3 *db, char *username, int races, int wins)
+{
+  const char *zSql = "UPDATE PLAYER_DATA SET VENDETTA_COUNT = ?, VENDETTA_WINS = ? WHERE USERNAME = trim(?)";
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
+      gs_error("Prepare SQL error");
+      return 0;
+  }
+  int ret = 0;
+  int rc = sqlite3_bind_int(pStmt, 1, races);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int1 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_int(pStmt, 2, wins);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind int2 failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_bind_text(pStmt, 3, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind text failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_step(pStmt);
+  if (rc != SQLITE_DONE) {
+    gs_error("Update failed error: %d", rc);
+    goto exit;
+  }
+  ret = 1;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}
+
+int update_record(sqlite3 *db, char *username, int track, int mode, int lap_time, int max_speed)
+{
+  // TODO
+  return -1;
+}
+
+// TODO ...
+int load_hall_of_fame(sqlite3 *db, char *current_user, int type, int class, char* msg, int size)
+{
+  char zSql[256];
+  strcpy(zSql, "SELECT USERNAME, ");
+  switch (type)
+  {
+    case 0:
+      strcat(zSql, "DRIVING_POINTS from PLAYER_DATA");
+      break;
+    case 1:
+      strcat(zSql, "CASH from PLAYER_DATA");
+      break;
+    default: // FIXME
+      break;
+  }
+  if (class < 4)
+    strcat(zSql, " WHERE CLASS = ?");
+  strcat(zSql, " ORDER BY ");
+  switch (type)
+  {
+    case 0:
+      strcat(zSql, "DRIVING_POINTS");
+      break;
+    case 1:
+      strcat(zSql, "CASH");
+      break;
+    default: // FIXME
+      break;
+  }
+  strcat(zSql, " DESC");
+
+  sqlite3_stmt *pStmt;
+  int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if (rc != SQLITE_OK) {
+    gs_error("Prepare SQL error: %d", rc);
+    return 0;
+  }
+  if (class < 4)
+    sqlite3_bind_int(pStmt, 1, class);
+
+  int group = 0;
+  char *pGroupSize = &msg[0];
+  int nr = 0;
+  int idx = 0;
+  int rank = 1;
+  int ranks[21];
+  int rankCount = 0;
+  int currentUserSeen = 0;
+  while (sqlite3_step(pStmt) == SQLITE_ROW)
+  {
+    const char *user = (const char *)sqlite3_column_text(pStmt, 0);
+    if (!strcmp(user, current_user)) {
+      if (group == 1) {
+	  *pGroupSize = nr;
+	  pGroupSize = &msg[idx];
+	  idx += 1;
+	  group = 2;
+      }
+      currentUserSeen = 1;
+    }
+    if (idx + 20 >= size) {
+      gs_info("Can't add more to msg");
+      sqlite3_finalize(pStmt);
+      return 0;
+    }
+    strcpy(&msg[idx], user);
+    idx += 16;
+    int score = sqlite3_column_int(pStmt, 1);
+    memcpy(&msg[idx], &score, sizeof(uint32_t));
+    idx += 4;
+    nr++;
+    if (nr == 10 && currentUserSeen)
+      break;
+    switch (group) {
+      case 0:
+	if (nr == 10) {
+	    *pGroupSize = nr;
+	    pGroupSize = &msg[idx];
+	    idx += 1;
+	    group = 1;
+	}
+	break;
+    }
+    ranks[rankCount++] = rank;
+    rank++;
+  }
+  *pGroupSize = nr;
+  memcpy(&msg[idx], ranks, rankCount * sizeof(int));
+  idx += rankCount * sizeof(int);
+
+  sqlite3_finalize(pStmt);
+  return idx;
+}
+
