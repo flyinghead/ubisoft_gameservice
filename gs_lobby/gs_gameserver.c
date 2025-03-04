@@ -94,6 +94,7 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
 
 void send_udp_player(player_t *player, char* msg, uint16_t pkt_size) {
   uint24_to_char(player->udp_client_seq, &msg[3]);
+  player->udp_client_seq &= 0x7fffff;
   uint16_to_char(player->udp_last_time, &msg[8]);
   sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
 	     (struct sockaddr*)&player->udp_addr,
@@ -1272,7 +1273,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   }
 
   /* Parse header */
-  pl->udp_client_seq = char_to_uint24(&buf[0]);
+  pl->udp_client_seq = (pl->udp_client_seq & 0x800000) | char_to_uint24(&buf[0]);
   pl->udp_last_time = char_to_uint16(&buf[6]);
   char *p = &buf[10];
   while (p - buf < buf_len)
@@ -1292,6 +1293,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 		gs_info("Got UDPCONNECT");
 		pl->udp_ready = 1;
 		pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
+		pl->udp_client_seq &= 0x7fffff;
 		uint16_to_char(pl->udp_last_time, &msg[8]);
 		sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
 		       (struct sockaddr*)&pl->udp_addr,
@@ -1313,6 +1315,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
 	      uint32_to_char(rate, &msg[14]);
 	      pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
+	      pl->udp_client_seq &= 0x7fffff;
 	      uint16_to_char(pl->udp_last_time, &msg[8]);
 	      sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
 		     (struct sockaddr*)&pl->udp_addr,
