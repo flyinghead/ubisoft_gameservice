@@ -50,6 +50,7 @@ typedef struct {
   int udp_ready;
   uint16_t udp_last_time;
   uint32_t udp_client_seq;
+  time_t udp_last_update;
   uint32_t trophies;
   uint32_t points;
   struct sockaddr_in addr;

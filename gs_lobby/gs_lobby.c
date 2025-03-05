@@ -41,7 +41,8 @@
 #define SESSION_WAITING 0x10
 #define PASSWORD_PROTECTED 15
 
-void player_cleanup(server_data_t *s, player_t *pl);
+/* returns 1 if the user's current session was deleted because empty */
+int player_cleanup(server_data_t *s, player_t *pl);
 void remove_server_player(player_t *pl);
 void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size);
 void remove_server_session(server_data_t *s, session_t *sess);
@@ -106,6 +107,25 @@ void *gameserver_pipe_handler(void *data) {
             && c <= sizeof(sess->session_gameinfo))
           read(sess->gameserver_pipe, sess->session_gameinfo, (size_t)c);
     	break;
+      case 'K':
+	{
+	  char username[MAX_UNAME_LEN];
+	  if (read(sess->gameserver_pipe, &c, 1) == 1
+		&& c <= sizeof(username)
+		&& read(sess->gameserver_pipe, username, (size_t)c) == c)
+	  {
+	      for (int i = 0; i < sess->session_max_players; i++) {
+	        if (sess->p_l[i] && !strcmp(sess->p_l[i]->username, username)) {
+	          if (player_cleanup(sess->server, sess->p_l[i]))
+	            /* session has been deleted */
+	            return NULL;
+	          else
+	            break;
+	        }
+	      }
+	  }
+	}
+	break;
       default:
     	gs_error("gameserver_pipe_handler: unknown message %d", c);
     	break;
@@ -176,7 +196,7 @@ void *keepalive_server_handler(void *data) {
       if(s->server_p_l[i] != NULL) {
 	//Time between keepalive should not be more then 5min (300 sec)
 	if ((now - (s->server_p_l[i]->keepalive)) > 300) {
-	  gs_info("[LOBBY] - User %s is not sending keepalive, last was %d ago",
+	  gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
 		  s->server_p_l[i]->username,
 		  (now - (s->server_p_l[i]->keepalive)));
 	  remove_server_player(s->server_p_l[i]);
@@ -446,7 +466,7 @@ void remove_all_player_from_session(session_t *sess, char* msg) {
   }
 }
 
-void player_cleanup(server_data_t *s, player_t *pl) {
+int player_cleanup(server_data_t *s, player_t *pl) {
   uint16_t pkt_size = 0;
   session_t* sess = NULL;
   char msg[MAX_PKT_SIZE];
@@ -454,7 +474,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
   
   if (pl == NULL) {
     gs_info("Player cleanup with a NULL pointer is bad");
-    return;
+    return 0;
   }
 
   sess = find_server_session(s, pl->in_session_id);
@@ -474,7 +494,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
 
     if (hit == 0) {
       gs_info("Player struct has in_session_id value but player is not there anymore");
-      return;
+      return 0;
     }
     
     remove_player_from_session(sess, pl);
@@ -485,7 +505,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
 
     if (s->server_type == POD_SERVER && sess->session_id == s->chatgroup_id) {
       gs_info("Leaving chat..");
-      return;
+      return 0;
     }
     
     if (sess->session_nb_players == 0) {
@@ -494,6 +514,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
       send_msg_to_lobby(s, msg, pkt_size);
       /* Sess is freed here */
       remove_server_session(s, sess);
+      return 1;
     } else {
       pkt_size = create_updategroupsize(&msg[6],sess->session_id,sess->session_nb_players);
       pkt_size = create_gs_hdr(msg, UPDATEGROUPSIZE, 0x24, pkt_size);
@@ -504,6 +525,7 @@ void player_cleanup(server_data_t *s, player_t *pl) {
     pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
     send_msg_to_lobby(s, msg, pkt_size);
   }
+  return 0;
 }
 
 int add_server_session(server_data_t *s,

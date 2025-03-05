@@ -298,6 +298,7 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
   pl->udp_ready = 0;
   pl->udp_client_seq = 0;
   pl->udp_last_time = 0;
+  pl->udp_last_update = 0;
   pl->player_id = 0;
   
   pthread_mutex_lock(&s->mutex);
@@ -406,6 +407,24 @@ int parse_gameserver_header(char *buf, int buf_len) {
     return pkt_size;
 
   return 0;
+}
+
+void lobby_kick_player(server_data_t *server, uint16_t player_id)
+{
+  player_t *player = NULL;
+  for(int i = 0; i < server->max_players; i++) {
+    player = server->p_l[i];
+    if (player && player->player_id == player_id)
+      break;
+    player = NULL;
+  }
+  if (player == NULL)
+    return;
+  char msg[MAX_UNAME_LEN + 2];
+  msg[0] = 'K';
+  msg[1] = (char)strlen(player->username) + 1;
+  strncpy(&msg[2], player->username, MAX_UNAME_LEN);
+  write(server->lobby_pipe, msg, (size_t)(msg[1] + 2));
 }
 
 /*
@@ -935,6 +954,11 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // 0010 | 05 00 00 00 00 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0
       //   or   05 8C FE nn nn 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0  with nnnn increasing
       // 0020 | 20 35 20 32 20 34 20 34 20 31 20 30 00          |  5 2 4 4 1 0.
+      // 7      0          0      0         3        0      5       2     4     4      1      5000
+      // track# weather    time   reverse   mode     mirror max     laps  max   max    nitro  wager
+      //        0=clear    0=day            3=std           players       car   driver
+      //        1=cloudy   1=dusk           4=trial                       class class
+      //        ...        ...
       strlcpy(s->session_info, &msg[21], sizeof(s->session_info));
       pkt_size = 13;
       memcpy(msg + 8, buf + 8, pkt_size);
@@ -992,7 +1016,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     case SDO_LOCAL_END_OF_RACE:
       gs_info("Got SDO_LOCAL_END_OF_RACE");
-      // TODO update lobby session? wakeup? send to others?
       break;
 
     case SDO_PLAYER_KICK:
@@ -1216,7 +1239,9 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       update_vendetta_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
       break;
 
-    // TODO SDO_PLAYER_QUIT_RACE(void)
+    case SDO_PLAYER_QUIT_RACE:
+      lobby_kick_player(s, *(uint16_t *)&buf[5]);
+      break;
 
     default:
       gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, recv_flag);
@@ -1273,8 +1298,10 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   }
 
   /* Parse header */
+  time_t now = get_time_ms();
   pl->udp_client_seq = (pl->udp_client_seq & 0x800000) | char_to_uint24(&buf[0]);
   pl->udp_last_time = char_to_uint16(&buf[6]);
+  pl->udp_last_update = now;
   char *p = &buf[10];
   while (p - buf < buf_len)
   {
@@ -1336,6 +1363,18 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    send_udp_functions(send_flag, buf, (uint16_t)buf_len, s, ntohs(char_to_uint16(&buf[0x10])));
     } else {
 	send_udp_functions(send_flag, buf, (uint16_t)(buf_len), s, pl->player_id);
+    }
+  }
+  /* Handle timeouts */
+  for (int i = 0; i < (int)s->max_players; i++)
+  {
+    player_t *player = s->p_l[i];
+    if (player && player->udp_last_update != 0 && (now - player->udp_last_update) >= 30000) {
+      gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
+      /* Notify lobby to remove player from session */
+      lobby_kick_player(s, player->player_id);
+      /* Close the client connection */
+      shutdown(player->sock, SHUT_RDWR);
     }
   }
   pthread_mutex_unlock(&s->mutex);
