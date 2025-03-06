@@ -24,4 +24,7 @@ int load_motd(sqlite3 *db, char *text, int size);
 int update_std_race(sqlite3 *db, char *username, int races, int wins);
 int update_trial_race(sqlite3 *db, char *username, int races, int trials, int wins, int cash_won);
 int update_vendetta_race(sqlite3 *db, char *username, int races, int wins);
-int update_record(sqlite3 *db, char *username, int track, int mode, int lap_time, int max_speed);
+int update_track_record(sqlite3 *db, char *username, int track, int mode, int lap_time, int race_time, int max_speed);
+int load_best_lap(sqlite3 *db, int track, int mode);
+int load_sdo_track_record(sqlite3 *db, char *username, int track, int mode, int class, char *buf);
+int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *buf);

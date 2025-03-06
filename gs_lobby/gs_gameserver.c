@@ -922,7 +922,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	  *(int *)&msg[458] = 8;
 	  *(int *)&msg[462] = 9;
 	  */
-	  *(int *)&msg[466] = 1;	// std avg multiplier?
+	  *(int *)&msg[466] = 190;	// std avg multiplier?
 	  /*
 //	  *(int *)&msg[470] = 26;	// 5 bytes? ff ff ff ff ff
 	  *(int *)&msg[475] = 0;	// favorite track mode
@@ -959,7 +959,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       //        0=clear    0=day            3=std           players       car   driver
       //        1=cloudy   1=dusk           4=trial                       class class
       //        ...        ...
-      strlcpy(s->session_info, &msg[21], sizeof(s->session_info));
+      strlcpy(s->session_info, &buf[21], sizeof(s->session_info));
       pkt_size = 13;
       memcpy(msg + 8, buf + 8, pkt_size);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
@@ -1038,11 +1038,13 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     case SDO_GETBESTLAP:
       {
-	gs_info("Got SDO_GETBESTLAP");
 	int laptime = -1;
 	if (s->session_info[0] != '\0') {
-	  int track_num = atoi(s->session_info);
-	  // TODO laptime = load_best_lap(s->db, track_num);
+	  int track_num, reverse, mirror;
+	  sscanf(s->session_info, "%d %*d %*d %d %*d %d", &track_num, &reverse, &mirror);
+	  int race_mode = reverse | (mirror << 1);
+	  gs_info("Got SDO_GETBESTLAP: track %d reverse %d mirror %d", track_num, reverse, mirror);
+	  laptime = load_best_lap(s->db, track_num, race_mode);
 	}
 	*(int *)&msg[8] = laptime;
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GETBESTLAP, SENDTOPLAYER, 4);
@@ -1061,13 +1063,25 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	//                                track#      mode
 	// 0010 | C2 EA 7F 00 00 00 00 00 46 DF 34 00             | .......F.4.
 	//        lap time                max speed?
-	int laptime = *(int *)&buf[16];
-	int recordtime = update_record(s->db, pl->username, *(int *)&buf[8], *(int *)&buf[12], laptime, *(int *)&buf[24]);
-	if (recordtime != -1) {
-	    // Reply if new personal or world record? doesn't look like it
-	    *(int *)&msg[8] = laptime;
-	    *(int *)&msg[12] = recordtime;
-	    pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, 8);
+	// 3 laps:
+	// 0000 | 00 00 1C 40 04 01 00 C7 07 00 00 00 00 00 00 00 | ...@............
+	// 0010 | F6 28 66 00 12 98 40 01 B1 5A 39 00             | .(f...@..Z9.
+	//        lap time    race time   max speed
+	// FIXME max speed doesn't depend on track mode? DNF player doesn't set the track mode when recording its max speed
+	int track_num = *(int *)&buf[8];
+	int track_mode = *(int *)&buf[12];
+	int lap_time = *(int *)&buf[16];
+	int race_time = *(int *)&buf[20];
+	int max_speed = *(int *)&buf[24];
+	int new_record = update_track_record(s->db, pl->username, track_num, track_mode, lap_time, race_time, max_speed);
+	if (new_record > 0)
+	{
+	  // Reply if new personal or world record
+	  // param1 is a bitmap: 0: laptime, 1: racetime, 2: maxspeed
+	  *(int *)&msg[8] = new_record & 0xf;
+	  // param2 is the same for world records
+	  *(int *)&msg[12] = (new_record >> 4) & 0xf;
+	  pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS_UPDATE, SENDTOPLAYER, 8);
 	}
       }
       break;
@@ -1075,14 +1089,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     case SDO_TRACKRECORDS:
       gs_info("Got SDO_TRACKRECORDS");
       print_gs_data(buf, (unsigned)buf_len);
-      // aspen winter normal:
-      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 00 00
-      // holly  normal:
-      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 00
-      // holly reverse:
-      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 01
-      // holly mirror:
-      // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 02
       // holly reverse/mirror:
       // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 03
 
@@ -1098,30 +1104,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	int class = buf[8];	// 4: all, 0: class D, 1: class C, ...
 	int track = buf[12];
 	int mode = buf[13];	// 0: normal, 1: reverse, 2:mirror, 3:reverse/mirror
-	int idx = 8;
-	for (int i = 0; i < 3; i++)
-	  {
-	    msg[idx++] = 3;
-	    strcpy(&msg[idx], "Player 1");
-	    idx += 16;
-	    *(int *)&msg[idx] = 0x2D1234;
-	    idx += 4;
-	    strcpy(&msg[idx], "Player 2");
-	    idx += 16;
-	    *(int *)&msg[idx] = 0x2D2234;
-	    idx += 4;
-	    strcpy(&msg[idx], "Player 3");
-	    idx += 16;
-	    *(int *)&msg[idx] = 0x2D3234;
-	    idx += 4;
-
-	    msg[idx++] = 1;
-	    strcpy(&msg[idx], "Me");
-	    idx += 16;
-	    *(int *)&msg[idx] = 0x34df46;	// 2d4234 -> 101.83 mph (/29127.7), 34df46 -> 118.96 mph (/29127.7)
-	    idx += 4;
-	  }
-	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, (uint16_t)(idx - 8));
+	pkt_size = (uint16_t)load_sdo_track_record(s->db, pl->username, track, mode, class, &msg[8]);
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_TRACKRECORDS, SENDTOPLAYER, pkt_size);
       }
       break;
 
@@ -1143,74 +1127,8 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       // count[3] ints
       {
 	int class = buf[8];	// 4: all, 0: class D, 1: class C, ...
-
-	int idx = 8;
-	msg[idx++] = 10;
-	for (int i = 0; i < 10; i++) {
-	    strcpy(&msg[idx], "Player 1");
-	    msg[idx + 7] = (char)('A' + i);
-	    *(int *)&msg[idx + 16] = 1000 - (i + 1) * 10; // points
-	    idx += 20;
-	}
-	msg[idx++] = 5;	// The order of this group is inverted??? wtaf?
-	strcpy(&msg[idx], "Player 5 before");
-	idx += 16;
-	*(int *)&msg[idx] = 205;
-	idx += 4;
-	strcpy(&msg[idx], "Player 4 before");
-	idx += 16;
-	*(int *)&msg[idx] = 204;
-	idx += 4;
-	strcpy(&msg[idx], "Player 3 before");
-	idx += 16;
-	*(int *)&msg[idx] = 203;
-	idx += 4;
-	strcpy(&msg[idx], "Player 2 before");
-	idx += 16;
-	*(int *)&msg[idx] = 202;
-	idx += 4;
-	strcpy(&msg[idx], "Player before");
-	idx += 16;
-	*(int *)&msg[idx] = 201;
-	idx += 4;
-
-	msg[idx++] = 1;
-	strcpy(&msg[idx], "FLY");
-	idx += 16;
-	*(int *)&msg[idx] = 200;
-	idx += 4;
-
-	msg[idx++] = 5;
-	strcpy(&msg[idx], "Player after");
-	idx += 16;
-	*(int *)&msg[idx] = 199;
-	idx += 4;
-	strcpy(&msg[idx], "Player after 2");
-	idx += 16;
-	*(int *)&msg[idx] = 198;
-	idx += 4;
-	strcpy(&msg[idx], "Player after 3");
-	idx += 16;
-	*(int *)&msg[idx] = 197;
-	idx += 4;
-	strcpy(&msg[idx], "Player after 4");
-	idx += 16;
-	*(int *)&msg[idx] = 196;
-	idx += 4;
-	strcpy(&msg[idx], "Player after 5");
-	idx += 16;
-	*(int *)&msg[idx] = 195;
-	idx += 4;
-
-	for (int i = 0; i < 10; i++) {
-	    *(int *)&msg[idx] = i + 1; // corresponding rank (1+)
-	    idx += 4;
-	}
-	for (int i = 0; i < 11; i++) {
-	    *(int *)&msg[idx] = i + 95; // corresponding rank (1+)
-	    idx += 4;
-	}
-	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_STATS_POINT, SENDTOPLAYER, (uint16_t)(idx - 8));
+	pkt_size = (uint16_t)load_hall_of_fame(s->db, pl->username, recv_flag - SDO_STATS_POINT, class, &msg[8]);
+	pkt_size = create_gameserver_hdr(msg, recv_flag, SENDTOPLAYER, pkt_size);
       }
       break;
 
