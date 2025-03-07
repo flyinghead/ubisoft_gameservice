@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <sqlite3.h>
 #include <netinet/in.h>
 
@@ -214,3 +215,4 @@ int bin16_to_msg(uint16_t value, char* msg);
 int bin32_to_msg(uint32_t value, char* msg);
 int str2int(char const* str);
 void send_gs_msg(int sock, char* msg, uint16_t pkt_size);
+time_t get_time_ms();

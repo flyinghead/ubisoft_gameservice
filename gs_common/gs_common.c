@@ -8,7 +8,6 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <time.h>
 #include <stdarg.h>
 #include <math.h>
 #include "gs_common.h"
@@ -249,4 +248,10 @@ int str2int(char const* str) {
   }
 
   return (int)ret;
+}
+
+time_t get_time_ms() {
+  struct timespec now;
+  clock_gettime(CLOCK_REALTIME, &now);
+  return now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }

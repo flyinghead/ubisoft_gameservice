@@ -1293,25 +1293,41 @@ int load_best_lap(sqlite3 *db, int track, int mode) {
 int load_top3_record(sqlite3 *db, int track, int mode, int class, char *buf, const char *column, const char *order)
 {
   buf[0] = (char)0;
-  char sql[256];
-  // FIXME how do we select only one driver class???
-  sprintf(sql, "SELECT USERNAME, %s FROM TRACK_RECORD WHERE TRACK = ? AND RACE_MODE = ? AND %s != -1 ORDER BY %s %s LIMIT 3",
-	  column, column, column, order);
+  char sql[512];
+  if (class == 4)
+    sprintf(sql, "SELECT USERNAME, %s "
+	"FROM TRACK_RECORD "
+	"WHERE TRACK = :track AND RACE_MODE = :mode AND %s != -1 "
+	"ORDER BY %s %s LIMIT 3",
+	column, column, column, order);
+  else
+    sprintf(sql, "SELECT TRACK_RECORD.USERNAME, %s "
+	"FROM TRACK_RECORD INNER JOIN PLAYER_DATA ON PLAYER_DATA.USERNAME = TRACK_RECORD.USERNAME "
+	"WHERE TRACK = :track AND RACE_MODE = :mode AND %s != -1 AND PLAYER_DATA.CLASS = :class "
+	"ORDER BY %s %s LIMIT 3",
+	column, column, column, order);
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
     gs_error("Prepare SQL error");
     return 0;
   }
   int ret = 0;
-  int rc = sqlite3_bind_int(pStmt, 1, track);
+  int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":track"), track);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
+    gs_error("Bind track failed error: %d", rc);
     goto exit;
   }
-  rc = sqlite3_bind_int(pStmt, 2, mode);
+  rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":mode"), mode);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
+    gs_error("Bind mode failed error: %d", rc);
     goto exit;
+  }
+  if (class != 4) {
+    int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
+    if (rc != SQLITE_OK) {
+      gs_error("Bind class failed error: %d", rc);
+      goto exit;
+    }
   }
   char *p = buf + 1;
   while (sqlite3_step(pStmt) == SQLITE_ROW)
@@ -1425,7 +1441,7 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
     default: qcol = "null"; break;
   }
   // Zone 0: top 10
-  char sql[256];
+  char sql[512];
   sprintf(sql, "SELECT username, %s v, RANK() OVER (ORDER BY %s DESC) rnk FROM player_data WHERE v != 0 %s ORDER BY rnk LIMIT 10", qcol, qcol,
 	  class == 4 ? "" : "AND class = :class");
   sqlite3_stmt *pStmt;
@@ -1440,10 +1456,12 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
       goto exit;
     }
   }
-  char *zone_count = buf;
-  char *p = buf + 1;
   int ranks[31];
   unsigned nranks = 0;
+  char *p = buf;
+  char *zone_count = p;
+  *zone_count = 0;
+  p += 1;
   int current_user_seen = 0;
   while (sqlite3_step(pStmt) == SQLITE_ROW && *zone_count < 10) {
     strcpy(p, (const char *)sqlite3_column_text(pStmt, 0));

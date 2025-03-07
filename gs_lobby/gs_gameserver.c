@@ -39,12 +39,6 @@
 uint32_t serverSeq = 1;
 server_data_t server_data;
 
-time_t get_time_ms() {
-  struct timespec now;
-  clock_gettime(CLOCK_REALTIME, &now);
-  return now.tv_sec * 1000 + now.tv_nsec / 1000000;
-}
-
 void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;
   
@@ -745,29 +739,29 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	int data[436] = {};
 	// Ranking bonuses
 	// class D
-	data[0] = 13000;	// #1
-	data[1] = 7700;		// #2
-	data[2] = 4000;		// #3
-	data[3] = 2000;		// #4
-	data[4] = 1000;		// #5
+	data[0] = 10080;	// #1
+	data[1] = 6000;		// #2
+	data[2] = 3000;		// #3
+	data[3] = 1500;		// #4
+	data[4] = 600;		// #5
 	// class C
-	data[5] = 16200;	// #1
-	data[6] = 9600;		// #2
-	data[7] = 4800;		// #3
-	data[8] = 2400;		// #4
-	data[9] = 1100;		// #5
+	data[5] = 15120;	// #1
+	data[6] = 9000;		// #2
+	data[7] = 4500;		// #3
+	data[8] = 2250;		// #4
+	data[9] = 900;		// #5
 	// class B
-	data[10] = 20200;	// #1
-	data[11] = 12000;	// #2
-	data[12] = 6000;	// #3
-	data[13] = 3000;	// #4 confirmed
-	data[14] = 1200;	// #5 confirmed
+	data[10] = 25200;	// #1
+	data[11] = 15000;	// #2
+	data[12] = 7500;	// #3
+	data[13] = 3750;	// #4
+	data[14] = 1500;	// #5
 	// class A
-	data[15] = 25200;	// #1 confirmed
-	data[16] = 15000;	// #2 confirmed
-	data[17] = 7500;	// #3 confirmed
-	data[18] = 3750;	// #4 confirmed
-	data[19] = 1500;	// #5 confirmed
+	data[15] = 50400;	// #1
+	data[16] = 30000;	// #2
+	data[17] = 15000;	// #3
+	data[18] = 7500;	// #4
+	data[19] = 3000;	// #5
 
 	data[20] = 6661;	// TODO ?
 	data[21] = 5000;	// Paint job price
@@ -785,37 +779,65 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	data[31] = 100;		// % repair cost multiplier
 	data[32] = 100;		// % cash -> driver points
 
-	data[33] = 1300;	// race bonus 1 (per class)
-	data[34] = 1500;	// confirmed
-	data[35] = 1700;
-	data[36] = 1900;	// confirmed
-	data[37] = 1300;	// race bonus 2 (per class)
-	data[38] = 1500;
-	data[39] = 1700;
-	data[40] = 1900;
-	data[41] = 1300;	// race bonus 3 (per class)
-	data[42] = 1500;
-	data[43] = 1700;
-	data[44] = 1900;
+	data[33] = 500;		// race bonus 1 (per class)
+	data[34] = 1000;
+	data[35] = 2000;
+	data[36] = 4000;
+	data[37] = 500;		// race bonus 2 (per class)
+	data[38] = 1000;
+	data[39] = 2000;
+	data[40] = 4000;
+	data[41] = 500;		// race bonus 3 (per class)
+	data[42] = 1000;
+	data[43] = 2000;
+	data[44] = 4000;
 
 	data[45] = 500;		// radar busted premiums (per class)
 	data[46] = 1000;
 	data[47] = 2000;
-	data[48] = 3000;
+	data[48] = 4000;
 	data[49] = 5;		// radar busted bonus per mph (per class)
 	data[50] = 10;
 	data[51] = 20;
-	data[52] = 30;
+	data[52] = 40;
 	load_game_defines(s->db, data, sizeof(data) / sizeof(data[0]));
-	// montreal1 (!reverse)
-	data[53 + 10 * 4 * 3 * 2 + 18] = 98;
-	data[53 + 10 * 4 * 3 * 2 + 20] = 80;
-	data[53 + 10 * 4 * 3 * 2 + 22] = 91;
-	// reverse: 19, 21, 23
-	// newyork1
-	data[53 + 14 * 4 * 3 * 2 + 18] = 95;
-	data[53 + 14 * 4 * 3 * 2 + 20] = 116;
-	//data[53 + 14 * 4 * 3 * 2 + 22] = ?
+	// montreal1 (forward)
+	size_t idx = 53 + 10 * 4 * 3 * 2;
+	// class A
+	data[idx] = 117; idx += 2;
+	data[idx] = 96; idx += 2;
+	data[idx] = 109; idx += 2;
+	// class B
+	data[idx] = 107; idx += 2;
+	data[idx] = 88; idx += 2;
+	data[idx] = 100; idx += 2;
+	// class C
+	data[idx] = 98; idx += 2; // actual value
+	data[idx] = 80; idx += 2; // actual value
+	data[idx] = 91; idx += 2; // actual value
+	// class D
+	data[idx] = 92; idx += 2;
+	data[idx] = 75; idx += 2;
+	data[idx] = 85; idx += 2;
+	// (reverse on odd indexes)
+	// newyork1 (forward)
+	idx = 53 + 14 * 4 * 3 * 2;
+	// class A
+	data[idx] = 104; idx += 2;
+	data[idx] = 127; idx += 2;
+	data[idx] = 115; idx += 2; // unknown
+	// class B
+	data[idx] = 95; idx += 2; // actual value
+	data[idx] = 116; idx += 2; // actual value
+	data[idx] = 105; idx += 2; // unknown
+	// class C
+	data[idx] = 87; idx += 2;
+	data[idx] = 106; idx += 2;
+	data[idx] = 96; idx += 2; // unknown
+	// class D
+	data[idx] = 81; idx += 2;
+	data[idx] = 99; idx += 2;
+	data[idx] = 90; idx += 2; // unknown
 	memcpy(&msg[8], data, sizeof(data));
 	pkt_size = sizeof(data);
       }

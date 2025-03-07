@@ -27,10 +27,11 @@
 #include <netinet/tcp.h>
 #include <string.h>
 #include <pthread.h>
-#include <time.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include "gs_lobby.h"
 #include "gs_waitmodule.h"
 #include "../gs_common/gs_common.h"
@@ -183,6 +184,43 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   sleep(3);
 }
 
+int tcp_ping(const struct sockaddr_in *addr)
+{
+  int sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock == -1)
+    return -1;
+  int flags = fcntl(sock, F_GETFL, IPPROTO_TCP);
+  fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+  struct sockaddr_in laddr = *addr;
+  laddr.sin_port = htons(80);
+
+  time_t t0 = get_time_ms();
+
+  int ret = connect(sock, (struct sockaddr *)&laddr, sizeof(laddr));
+  if (ret && errno != EINPROGRESS) {
+    close(sock);
+    return -1;
+  }
+  fd_set rfds, wfds;
+  FD_ZERO(&rfds);
+  FD_ZERO(&wfds);
+  FD_SET(sock, &rfds);
+  FD_SET(sock, &wfds);
+  struct timeval tv;
+  tv.tv_sec = 1;
+  tv.tv_usec = 0;
+  ret = select(sock + 1, &rfds, &wfds, NULL, &tv);
+  if (ret <= 0) {
+    /* timeout or error */
+    close(sock);
+    return -1;
+  }
+  time_t t1 = get_time_ms();
+  close(sock);
+  return (int)(t1 - t0);
+}
+
 void *keepalive_server_handler(void *data) {
   server_data_t *s = (server_data_t *)data;
   int i=0;
@@ -193,14 +231,24 @@ void *keepalive_server_handler(void *data) {
     seconds = time(NULL);
     now = (uint32_t)(seconds);
     for(i=0; i < (s->max_players); i++) {
-      if(s->server_p_l[i] != NULL) {
-	//Time between keepalive should not be more then 5min (300 sec)
-	if ((now - (s->server_p_l[i]->keepalive)) > 300) {
-	  gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
-		  s->server_p_l[i]->username,
-		  (now - (s->server_p_l[i]->keepalive)));
-	  remove_server_player(s->server_p_l[i]);
-	}
+      player_t *player = s->server_p_l[i];
+      if (player == NULL)
+        continue;
+      //Time between keepalive should not be more then 5min (300 sec)
+      if (now - player->keepalive > 300) {
+          gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
+		  player->username,
+		  now - player->keepalive);
+          remove_server_player(player);
+          continue;
+      }
+      if (s->server_type == SDO_SERVER && player->in_game == 0 && player->in_session_id != 0) {
+        int ping = tcp_ping(&player->addr);
+        ping = ping == -1 ? 10 : ping / 100;
+        char msg[128];
+        uint16_t pkt_size = create_updateplayerping(&msg[6], player->username, player->in_session_id, (uint8_t)ping);
+        pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
+        send_msg_to_lobby(s, msg, pkt_size);
       }
     }
 
@@ -223,7 +271,7 @@ void *keepalive_server_handler(void *data) {
 	}
       }
     }  
-    sleep(60);
+    sleep(10);
   }
   
   return 0;
@@ -740,7 +788,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 
     groupid = byte_array[0];
     sess = find_server_session(s, groupid);
-    gs_info("JOINSESSION %s %s groupid=%d %d session=%p", tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
+    gs_info("[lobby] %s JOINSESSION %s %s groupid=%d %d session=%p", pl->username, tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
     print_gs_data(buf, (long unsigned int)buf_len);
 
     /* Joining a session */
@@ -794,13 +842,20 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	
 	pkt_size = create_joinnew(&msg[6], pl->username, groupid);
 	pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
-	send_msg_to_session(sess, msg, pkt_size);
+	if (s->server_type == SDO_SERVER)
+	  // send to all players in lobby to update session player count
+	  send_msg_to_lobby(s, msg, pkt_size);
+	else
+	  send_msg_to_session(sess, msg, pkt_size);
       }
       
       /* Send your own ping value - DUMMY PING FOR NOW */
       pkt_size = create_updateplayerping(&msg[6], pl->username, groupid, (uint8_t)1);
       pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
-      send_msg_to_session(sess, msg, pkt_size);
+      if (s->server_type == SDO_SERVER)
+        send_msg_to_lobby(s, msg, pkt_size);
+      else
+        send_msg_to_session(sess, msg, pkt_size);
       
       /* Send other players ping in session */
       send_other_players_ping_in_session(sess, pl, msg);
@@ -872,7 +927,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d values from CREATESESSION packet needs 7", nr_b_parsed);
       return 0;
     }
-    gs_info("CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
+    gs_info("[lobby] %s CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
+	    pl->username,
 	    tok_array[0], tok_array[1], tok_array[2], tok_array[3], tok_array[4],
 	    byte_array[0], byte_array[1], byte_array[2], byte_array[3],
 	    byte_array[4], byte_array[5], byte_array[6]);
@@ -932,6 +988,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pl->in_game = 0;
     
     groupid = byte_array[0];
+    gs_info("[lobby] %s LEAVESESSION %d", pl->username, groupid);
     sess = find_server_session(s, groupid);
    
     if (sess != NULL) {
@@ -966,7 +1023,11 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
 	send_msg_to_others_in_lobby(s, pl, msg, pkt_size);
       }
-            
+      else if (s->server_type == SDO_SERVER) {
+	pkt_size = create_joinleave(&msg[6], pl->username, groupid);
+	pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
+	send_msg_to_lobby(s, msg, pkt_size);
+      }
     } else {
       pkt_size = create_joinleave(&msg[6], pl->username, groupid);
       pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
@@ -982,6 +1043,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     }
 
     groupid = byte_array[0];
+    gs_info("[lobby] %s BEGINGAME %d", pl->username, groupid);
     
     /*Lock the session*/
     sess = find_server_session(s, groupid);
@@ -1017,11 +1079,13 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pkt_size = 0;
     break;;
   case SLEEP:
+    gs_info("[lobby] %s SLEEP", pl->username);
     pkt_size = create_gssuccessful(&msg[6], STATUSCHANGE);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
     pl->in_game = 1;
     break;;
   case WAKEUP:
+    gs_info("[lobby] %s WAKEUP", pl->username);
     pkt_size = create_gssuccessful(&msg[6], STATUSCHANGE);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
     send_gs_msg(sock, msg, pkt_size);
