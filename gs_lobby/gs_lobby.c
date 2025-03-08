@@ -19,7 +19,7 @@
  *
  * Game Service Server functions for Dreamcast
  */
-
+#define _GNU_SOURCE	/* for pipe2 */
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -115,15 +115,19 @@ void *gameserver_pipe_handler(void *data) {
 		&& c <= sizeof(username)
 		&& read(sess->gameserver_pipe, username, (size_t)c) == c)
 	  {
+	      server_data_t *server = sess->server;
+	      pthread_mutex_lock(&server->mutex);
 	      for (int i = 0; i < sess->session_max_players; i++) {
 	        if (sess->p_l[i] && !strcmp(sess->p_l[i]->username, username)) {
-	          if (player_cleanup(sess->server, sess->p_l[i]))
+	          if (player_cleanup(server, sess->p_l[i])) {
 	            /* session has been deleted */
+	            pthread_mutex_unlock(&server->mutex);
 	            return NULL;
-	          else
-	            break;
+	          }
+              break;
 	        }
 	      }
+	      pthread_mutex_unlock(&server->mutex);
 	  }
 	}
 	break;
@@ -146,9 +150,9 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   int status;
   int pipefd[2];
 
-  if (pipe(pipefd)) {
-	perror("pipe");
-	pipefd[0] = pipefd[1] = -1;
+  if (pipe2(pipefd, O_CLOEXEC)) {
+    perror("pipe2");
+    pipefd[0] = pipefd[1] = -1;
   }
   char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258], arg_6[258];
   sprintf(arg_1, "-p %d", sess->session_gameport);
@@ -156,10 +160,14 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   sprintf(arg_3, "-m%s", sess->session_master);
   sprintf(arg_4, "-d%s", s->server_db_path);
   sprintf(arg_5, "-t %d", s->server_type);
-  sprintf(arg_6, "-i %d", pipefd[1]);
 
   if (!(pid = fork())) {
     if (!fork()) {
+      /* Duplicate the writing end of the pipe so it's not closed.
+       * Both file descriptors in pipefd[] will be closed on exec due to the O_CLOEXEC flag.
+       */
+      int wpipefd = dup(pipefd[1]);
+      sprintf(arg_6, "-i %d", wpipefd);
       gs_info("Starting GameServer with args %s %s %s %s %s %s",
 	      arg_1,
 	      arg_2,
@@ -172,14 +180,14 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
       exit(0);
     }
   } else {
-	close(pipefd[1]);
-	sess->gameserver_pipe = pipefd[0];
-	pthread_t thread_id;
-    if (pthread_create(&thread_id, NULL, gameserver_pipe_handler, sess) < 0)
+    /* close the writing end of the pipe */
+    close(pipefd[1]);
+    /* and keep the reading end */
+    sess->gameserver_pipe = pipefd[0];
+    /* create the pipe reading thread but don't detach it so we can stop it cleanly */
+    if (pthread_create(&sess->pipe_thread, NULL, gameserver_pipe_handler, sess) < 0)
       gs_error("Could not create thread");
-    else
-      pthread_detach(thread_id);
-	waitpid(pid, &status, 0);
+    waitpid(pid, &status, 0);
   }
   sleep(3);
 }
@@ -221,15 +229,21 @@ int tcp_ping(const struct sockaddr_in *addr)
   return (int)(t1 - t0);
 }
 
-void *keepalive_server_handler(void *data) {
+void *keepalive_server_handler(void *data)
+{
   server_data_t *s = (server_data_t *)data;
   int i=0;
   uint32_t now=0, duration=0;
   time_t seconds=0;
+  int ping_count;
+  struct sockaddr_in ping_addresses[100];
+  int ping_values[100];
     
   while(1) {
     seconds = time(NULL);
     now = (uint32_t)(seconds);
+    ping_count = 0;
+    pthread_mutex_lock(&s->mutex);
     for(i=0; i < (s->max_players); i++) {
       player_t *player = s->server_p_l[i];
       if (player == NULL)
@@ -239,16 +253,36 @@ void *keepalive_server_handler(void *data) {
           gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
 		  player->username,
 		  now - player->keepalive);
-          remove_server_player(player);
+          /* will make the client thread delete the player and exit */
+          shutdown(player->sock, SHUT_RDWR);
           continue;
       }
-      if (s->server_type == SDO_SERVER && player->in_game == 0 && player->in_session_id != 0) {
-        int ping = tcp_ping(&player->addr);
-        ping = ping == -1 ? 10 : ping / 100;
-        char msg[128];
-        uint16_t pkt_size = create_updateplayerping(&msg[6], player->username, player->in_session_id, (uint8_t)ping);
-        pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
-        send_msg_to_lobby(s, msg, pkt_size);
+      if (s->server_type == SDO_SERVER
+	  && player->in_game == 0
+	  && player->in_session_id != 0
+	  && (size_t)ping_count < sizeof(ping_values) / sizeof(ping_values[0]))
+	memcpy(&ping_addresses[ping_count++], &player->addr, sizeof(struct sockaddr_in));
+    }
+    pthread_mutex_unlock(&s->mutex);
+
+    for (i = 0; i < ping_count; i++)
+      ping_values[i] = tcp_ping(&ping_addresses[i]);
+
+    pthread_mutex_lock(&s->mutex);
+    for (i = 0; i < s->max_players; i++) {
+      player_t *player = s->server_p_l[i];
+      if (player == NULL)
+        continue;
+      for (int j = 0; j < ping_count; j++) {
+	if (!memcmp(&ping_addresses[j], &player->addr, sizeof(struct sockaddr_in))) {
+	    int ping = ping_values[j];
+	    player->ping = (uint8_t)(ping == -1 ? 10 : ping / 100);
+	    char msg[128];
+	    uint16_t pkt_size = create_updateplayerping(&msg[6], player->username, player->in_session_id, player->ping);
+	    pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
+	    send_msg_to_lobby(s, msg, pkt_size);
+	    break;
+	}
       }
     }
 
@@ -271,6 +305,7 @@ void *keepalive_server_handler(void *data) {
 	}
       }
     }  
+    pthread_mutex_unlock(&s->mutex);
     sleep(10);
   }
   
@@ -300,13 +335,22 @@ void send_other_players_in_lobby(server_data_t *s, player_t* pl, char* msg) {
   
   for (i = 0; i < s->max_players; i++) {
     /* Send to other players which is not in a game */
-    if (s->server_p_l[i] &&
-	s->server_p_l[i]->in_game == 0 &&
-	s->server_p_l[i]->in_session_id == 0 &&
-	s->server_p_l[i]->player_id != pl->player_id) {
-      pkt_size = create_joinnew(&msg[6], s->server_p_l[i]->username, s->basicgroup_id);
+    player_t *player = s->server_p_l[i];
+    if (player &&
+	player->in_game == 0 &&
+	player->player_id != pl->player_id) {
+      pkt_size = create_joinnew(&msg[6], player->username, s->basicgroup_id);
       pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
       send_gs_msg(pl->sock, msg, pkt_size);
+      /* SDO wants both the join group and the join session */
+      if (s->server_type == SDO_SERVER && player->in_session_id != 0) {
+	pkt_size = create_joinnew(&msg[6], player->username, player->in_session_id);
+	pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
+	send_gs_msg(pl->sock, msg, pkt_size);
+	pkt_size = create_updateplayerping(&msg[6], player->username, player->in_session_id, player->ping);
+	pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
+	send_gs_msg(pl->sock, msg, pkt_size);
+      }
     }
   } 
 }
@@ -337,7 +381,7 @@ void send_other_players_ping_in_session(session_t *sess, player_t* pl, char* msg
   
   for(i = 0; i < sess->session_max_players; i++) {
     if (sess->p_l[i] && sess->p_l[i]->player_id != pl->player_id) {
-      pkt_size = create_updateplayerping(&msg[6], sess->p_l[i]->username, sess->session_id, (uint8_t)1);
+      pkt_size = create_updateplayerping(&msg[6], sess->p_l[i]->username, sess->session_id, sess->p_l[i]->ping);
       pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
       send_gs_msg(pl->sock, msg, pkt_size);
     }
@@ -370,6 +414,7 @@ void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size) {
 
   gs_encode_data((uint8_t*)(msg+6), (size_t)(pkt_size-6));
   
+  pthread_mutex_lock(&s->mutex);
   for(i = 0; i < s->max_players; i++) {
     /* Send to all players which is not in a game */
     if (s->server_p_l[i] &&
@@ -377,6 +422,7 @@ void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size) {
       write(s->server_p_l[i]->sock, msg, pkt_size);
     }
   }
+  pthread_mutex_unlock(&s->mutex);
 }
 
 session_t* find_server_session(server_data_t *s, uint32_t session_id) {
@@ -399,14 +445,17 @@ int add_server_player(server_data_t *s, player_t *pl) {
   uint16_t max_players = s->max_players;
   memset(pl->username, 0, MAX_UNAME_LEN);
 
+  pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_players;i++) {
     if(!(s->server_p_l[i])) {
       s->server_p_l[i] = pl;
       s->group_size = s->group_size + 1;
+      pthread_mutex_unlock(&s->mutex);
       gs_info("Added player with id: 0x%02x", pl->player_id);
       return 1;
     }
   }
+  pthread_mutex_unlock(&s->mutex);
   
   gs_info("Could not add player with id: 0x%02x", pl->player_id);
   gs_info("Server full");
@@ -418,6 +467,7 @@ void remove_server_player(player_t *pl) {
   int max_players = s->max_players;
   int i=0;
   
+  pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_players;i++) {
     if (s->server_p_l[i] && s->server_p_l[i]->player_id == pl->player_id) {
       s->group_size = s->group_size - 1;
@@ -425,10 +475,10 @@ void remove_server_player(player_t *pl) {
       gs_info("Removed player with id: 0x%02x", pl->player_id);
       close(s->server_p_l[i]->sock);
       s->server_p_l[i] = NULL;
-      return;
+      break;
     }
   }
-  return;
+  pthread_mutex_unlock(&s->mutex);
 }
 
 int add_player_to_session(session_t *sess, player_t *pl) {
@@ -437,23 +487,33 @@ int add_player_to_session(session_t *sess, player_t *pl) {
 
   /* Sometimes people can break a session creation, this will hopefully remove the stale session */
   if (pl->in_session_id != 0) {
+    if (pl->in_session_id == sess->session_id) {
+	/* Already in the session. Not sure how this happens but it does */
+	gs_info("Player %s is already in session %d", sess->session_id);
+	return 1;
+    }
     /* Check if session is still active */
+    pthread_mutex_lock(&s->mutex);
     if (find_server_session(s, pl->in_session_id) != NULL)  {
       gs_info("Player %s is trying to join a session %d but is still in %d", pl->username, sess->session_id, pl->in_session_id);
       player_cleanup(s, pl);
     }
+    pthread_mutex_unlock(&s->mutex);
   }
   
+  pthread_mutex_lock(&s->mutex);
   for(i=0;i<sess->session_max_players;i++) {
      if(!(sess->p_l[i])) {
        gs_info("Added player %s to %s", pl->username, sess->session_name);
        sess->session_nb_players = sess->session_nb_players + 1;
        sess->p_l[i] = pl;
        pl->in_session_id = sess->session_id;
+       pthread_mutex_unlock(&s->mutex);
        return 1;
      }
   }
-  
+  pthread_mutex_unlock(&s->mutex);
+
   gs_info("Session is full");
   return 0;
 }
@@ -461,6 +521,7 @@ int add_player_to_session(session_t *sess, player_t *pl) {
 void remove_player_from_session(session_t *sess, player_t *pl) {
   int i=0;
       
+  pthread_mutex_lock(&sess->server->mutex);
   for(i=0;i<sess->session_max_players;i++) {
     if (sess->p_l[i] &&
 	sess->p_l[i]->player_id == pl->player_id) {
@@ -470,50 +531,39 @@ void remove_player_from_session(session_t *sess, player_t *pl) {
 
       pl->in_session_id = 0;
       sess->p_l[i] = NULL;
-      return;
+      break;
     }
   }
-  
-  return;
+  pthread_mutex_unlock(&sess->server->mutex);
 }
 
 void remove_server_session(server_data_t *s, session_t *sess) {
   uint16_t max_sessions = s->max_sessions;
   int i;
   
+  pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_sessions;i++) {
     if(s->s_l[i]) {
       if (s->s_l[i]->session_id == sess->session_id) {
 	gs_info("Removed session %s", sess->session_name);
-	if (sess->gameserver_pipe != -1)
+	if (sess->gameserver_pipe != -1) {
 	  close(sess->gameserver_pipe);
+	  /* Avoid deadlock with pipe thread */
+	  pthread_mutex_unlock(&s->mutex);
+	  pthread_join(sess->pipe_thread, NULL);
+	  pthread_mutex_lock(&s->mutex);
+	}
 	free(s->s_l[i]->p_l);
 	free(s->s_l[i]);
 	s->s_l[i] = NULL;
-	return;
+	break;
       }
     }
   }
-  return;
+  pthread_mutex_unlock(&s->mutex);
 }
 
-void remove_all_player_from_session(session_t *sess, char* msg) {
-  uint16_t pkt_size = 0;
-  int i = 0;
-
-  for (i = 0; i < sess->session_max_players; i++) {
-    if (sess->p_l[i]) {
-      pkt_size = create_joinleave(&msg[6], sess->p_l[i]->username, sess->session_id);
-      pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
-      send_msg_to_session(sess, msg, pkt_size);
-      
-      gs_info("Removed player %s (0x%02x) from %s", sess->p_l[i]->username, sess->p_l[i]->player_id, sess->session_name);
-      sess->session_nb_players = sess->session_nb_players - 1;
-      sess->p_l[i] = NULL;
-    }
-  }
-}
-
+/* Caller *must* lock the server mutex */
 int player_cleanup(server_data_t *s, player_t *pl) {
   uint16_t pkt_size = 0;
   session_t* sess = NULL;
@@ -659,10 +709,8 @@ int add_server_session(server_data_t *s,
   else
     sess->session_master_player_id = 0;
 
-  sess->p_l = calloc((size_t)sess->session_max_players, sizeof(player_t *));
-  for (i=0; i<sess->session_max_players; i++) {
-    sess->p_l[i] = NULL;
-  }
+  sess->p_l = calloc(sess->session_max_players, sizeof(player_t *));
+
   pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_sessions;i++) {
     if(!(s->s_l[i])) {
@@ -771,7 +819,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     }
     
     strlcpy(pl->username, tok_array[0], strlen(tok_array[0])+1);
-    gs_info("User %s is joining the %s server", pl->username, s->game);
+    gs_info("lobby: User %s is joining the %s server", pl->username, s->game);
     
     pkt_size = create_loginarena(&msg[6], s->arena_id);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
@@ -786,9 +834,17 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       return 0;
     }
 
+    /* calculate our ping now so we don't lock the entire server */
+    if (pl->ping == 10)
+    {
+      int ping = tcp_ping(&pl->addr);
+      pl->ping = (uint8_t)(ping == -1 ? 10 : ping / 100);
+    }
+
     groupid = byte_array[0];
+    pthread_mutex_lock(&s->mutex);
     sess = find_server_session(s, groupid);
-    gs_info("[lobby] %s JOINSESSION %s %s groupid=%d %d session=%p", pl->username, tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
+    gs_info("lobby: %s JOINSESSION %s %s groupid=%d %d session=%p", pl->username, tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
     print_gs_data(buf, (long unsigned int)buf_len);
 
     /* Joining a session */
@@ -798,6 +854,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	/* 27 Session full */
 	pkt_size = create_gsfail(&msg[6], JOINSESSION, 27);
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
+	pthread_mutex_unlock(&s->mutex);
 	return pkt_size;
       }
       if (sess->session_config == SESSION_LOCKED) {
@@ -805,6 +862,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	/* 30 Session locked  - Not Working */
 	pkt_size = create_gsfail(&msg[6], JOINSESSION, 30);
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
+	pthread_mutex_unlock(&s->mutex);
 	return pkt_size;
       }
       if (sess->session_config == PASSWORD_PROTECTED) {
@@ -814,6 +872,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	  /* 33 Incorrect password */
 	  pkt_size = create_gsfail(&msg[6], JOINSESSION, 33);
 	  pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
+	  pthread_mutex_unlock(&s->mutex);
 	  return pkt_size;
 	}
       }
@@ -825,8 +884,10 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     
     /* Add player to session */
     if (sess != NULL) {
-      if (!add_player_to_session(sess, pl))
+      if (!add_player_to_session(sess, pl)) {
+	pthread_mutex_unlock(&s->mutex);
 	return 0;
+      }
 
       /* Main Chat in POD needs joining player msg then rest of the players */
       if (s->server_type == POD_SERVER && sess->session_id == s->chatgroup_id) {
@@ -849,8 +910,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	  send_msg_to_session(sess, msg, pkt_size);
       }
       
-      /* Send your own ping value - DUMMY PING FOR NOW */
-      pkt_size = create_updateplayerping(&msg[6], pl->username, groupid, (uint8_t)1);
+      /* Send your own ping value */
+      pkt_size = create_updateplayerping(&msg[6], pl->username, groupid, pl->ping);
       pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
       if (s->server_type == SDO_SERVER)
         send_msg_to_lobby(s, msg, pkt_size);
@@ -915,7 +976,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       }
       send_other_players_in_lobby(s, pl, msg);
     }
-    
+    pthread_mutex_unlock(&s->mutex);
     pkt_size = 0;
     break;;
   case CREATESESSION:
@@ -927,13 +988,14 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d values from CREATESESSION packet needs 7", nr_b_parsed);
       return 0;
     }
-    gs_info("[lobby] %s CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
+    gs_info("lobby: %s CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
 	    pl->username,
 	    tok_array[0], tok_array[1], tok_array[2], tok_array[3], tok_array[4],
 	    byte_array[0], byte_array[1], byte_array[2], byte_array[3],
 	    byte_array[4], byte_array[5], byte_array[6]);
 
-    sess = (session_t *)malloc(sizeof(session_t));     
+    sess = (session_t *)malloc(sizeof(session_t));
+    pthread_mutex_lock(&s->mutex);
     if (!add_server_session(s,
 			    sess,
 			    pl,
@@ -949,6 +1011,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 			    byte_array[4],
 			    byte_array[5],
 			    byte_array[6])) {
+      pthread_mutex_unlock(&s->mutex);
       free(sess);
       return 0;
     }
@@ -975,6 +1038,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 				 );
     pkt_size = create_gs_hdr(msg, SESSIONNEW, 0x24, pkt_size);
     send_msg_to_lobby(s, msg, pkt_size);
+    pthread_mutex_unlock(&s->mutex);
       
     pkt_size = 0;
     break;;
@@ -988,7 +1052,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pl->in_game = 0;
     
     groupid = byte_array[0];
-    gs_info("[lobby] %s LEAVESESSION %d", pl->username, groupid);
+    gs_info("lobby: %s LEAVESESSION %d", pl->username, groupid);
+    pthread_mutex_lock(&s->mutex);
     sess = find_server_session(s, groupid);
    
     if (sess != NULL) {
@@ -1000,6 +1065,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       /* If POD Main chat we are done here */
       if (s->server_type == POD_SERVER && sess->session_id == s->chatgroup_id) {
 	gs_info("Leaving chat..");
+	pthread_mutex_unlock(&s->mutex);
 	return 0;
       }
       
@@ -1033,7 +1099,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
       send_msg_to_lobby(s, msg, pkt_size);
     }
-    
+    pthread_mutex_unlock(&s->mutex);
+
     pkt_size = 0;
     break;
   case BEGINGAME:
@@ -1043,9 +1110,10 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     }
 
     groupid = byte_array[0];
-    gs_info("[lobby] %s BEGINGAME %d", pl->username, groupid);
+    gs_info("lobby: %s BEGINGAME %d", pl->username, groupid);
     
     /*Lock the session*/
+    pthread_mutex_lock(&s->mutex);
     sess = find_server_session(s, groupid);
     if (sess != NULL) {
       
@@ -1066,7 +1134,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     } else {
       gs_error("Trying to lock session that doesn't exist");
     }
-    
+    pthread_mutex_unlock(&s->mutex);
+
     pkt_size = 0 ;
     break;;   
   case STILLALIVE:
@@ -1079,18 +1148,19 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pkt_size = 0;
     break;;
   case SLEEP:
-    gs_info("[lobby] %s SLEEP", pl->username);
+    gs_info("lobby: %s SLEEP", pl->username);
     pkt_size = create_gssuccessful(&msg[6], STATUSCHANGE);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
     pl->in_game = 1;
     break;;
   case WAKEUP:
-    gs_info("[lobby] %s WAKEUP", pl->username);
+    gs_info("lobby: %s WAKEUP", pl->username);
     pkt_size = create_gssuccessful(&msg[6], STATUSCHANGE);
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
     send_gs_msg(sock, msg, pkt_size);
     pl->in_game = 0;
 
+    pthread_mutex_lock(&s->mutex);
     for (i = 0; i < s->max_sessions; i++) {
       if (s->s_l[i]) {
 	pkt_size = create_sessionnew(&msg[6],
@@ -1112,11 +1182,12 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     }
     /* WAKE UP from Game, send all players in lobby */
     send_other_players_in_lobby(s, pl, msg);
+    pthread_mutex_unlock(&s->mutex);
 
     pkt_size = 0;
     break;;
   case DISCONNECTSESSION:
-    gs_info("%s disconnected from session", pl->username);
+    gs_info("lobby: %s disconnected from session", pl->username);
     break;;
   case FINDSUITABLEGROUP:
     // string SDODC_GARAGE
@@ -1128,7 +1199,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     }
     break;
   default:
-    gs_info("Flag not supported %x", recv_flag);
+    gs_info("lobby: Flag not supported %x", recv_flag);
     print_gs_data(buf, (long unsigned int)buf_len);
     return 0;
   }
@@ -1263,6 +1334,7 @@ void *gs_server_handler(void* data) {
     pl->in_game = 0;
     pl->trophies = 0;
     pl->points = 0;
+    pl->ping = 10;
     if (!add_server_player(s_data, pl)) {
         free(pl);
         return 0;

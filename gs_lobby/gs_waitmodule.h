@@ -14,6 +14,7 @@ typedef struct {
   int sock;
   int in_game;
   struct sockaddr_in addr;
+  uint8_t ping;
   char username[MAX_UNAME_LEN];
   uint32_t player_id;
   uint32_t in_session_id;
@@ -47,6 +48,7 @@ typedef struct {
   player_t **p_l;
   server_data_t *server;
   int gameserver_pipe;
+  pthread_t pipe_thread;
 } session_t;
 
 struct server_data {
@@ -77,6 +79,7 @@ struct server_data {
     
   sqlite3 *db;
   pthread_mutex_t mutex;
+  pthread_mutex_t wm_mutex;
 };
 
 

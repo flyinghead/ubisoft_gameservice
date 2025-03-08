@@ -190,7 +190,7 @@ int get_server_config(server_data_t *s, char *fn) {
 }
 
 void init_server(int argc, char *argv[], server_data_t *s) {
-  int opt, i;
+  int opt;
   char* config_path = NULL;
     
   while ((opt = getopt (argc, argv, "c:")) != -1) {
@@ -212,19 +212,14 @@ void init_server(int argc, char *argv[], server_data_t *s) {
 
   s->group_size = 0;
   
-  s->s_l = calloc((size_t)s->max_sessions, sizeof(session_t *));
-  s->waitmodule_p_l = calloc((size_t)s->max_players, sizeof(player_t *));
-  s->server_p_l = calloc((size_t)s->max_players, sizeof(player_t *));
+  s->s_l = calloc(s->max_sessions, sizeof(session_t *));
+  s->waitmodule_p_l = calloc(s->max_players, sizeof(player_t *));
+  s->server_p_l = calloc(s->max_players, sizeof(player_t *));
 
-  for(i=0;i<(s->max_sessions);i++)
-    s->s_l[i] = NULL;
-  for(i=0;i<(s->max_players);i++)
-    s->waitmodule_p_l[i] = NULL;
-  for(i=0;i<(s->max_players);i++)
-    s->server_p_l[i] = NULL;
   pthread_mutexattr_t mutexattr;
   pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
   pthread_mutex_init(&s->mutex, &mutexattr);
+  pthread_mutex_init(&s->wm_mutex, &mutexattr);
 }
 
 int add_waitmodule_player(server_data_t *s, player_t *pl) {
@@ -232,13 +227,16 @@ int add_waitmodule_player(server_data_t *s, player_t *pl) {
   uint16_t max_players = s->max_players;
   memset(pl->username, 0, MAX_UNAME_LEN);
 
+  pthread_mutex_lock(&s->wm_mutex);
   for(i=0;i<max_players;i++) {
     if(!(s->waitmodule_p_l[i])) {
       s->waitmodule_p_l[i] = pl;
+      pthread_mutex_unlock(&s->wm_mutex);
       gs_info("Added player with id: 0x%02x", pl->player_id);
       return 1;
     }
   }
+  pthread_mutex_unlock(&s->wm_mutex);
   gs_info("Could not add player with id: 0x%02x", pl->player_id);
   gs_info("Server full");
   return 0;
@@ -250,6 +248,7 @@ void remove_waitmodule_player(player_t *pl) {
   int max_players = s->max_players;
   int i=0;
   
+  pthread_mutex_lock(&s->wm_mutex);
   for(i=0;i<max_players;i++) {
     if (s->waitmodule_p_l[i] != NULL) {
       if(s->waitmodule_p_l[i]->player_id == pl->player_id) {
@@ -258,7 +257,7 @@ void remove_waitmodule_player(player_t *pl) {
       }
     }
   }
-  return;
+  pthread_mutex_unlock(&s->wm_mutex);
 }
 
 
@@ -402,9 +401,11 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
      
     } else {
       /* Fix for playerinfo lookup from POD chat */
+      pthread_mutex_lock(&s->wm_mutex);
       player_t *pl_lookup = find_user(s, username);
       if (pl_lookup != NULL) {
 	if( (inet_ntop(AF_INET, &(pl_lookup->addr.sin_addr), ip, INET_ADDRSTRLEN)) == NULL ) {
+	  pthread_mutex_unlock(&s->wm_mutex);
 	  gs_info("Could not convert to IPv4 string on user %s", pl_lookup->username);
 	  return 0;
 	}
@@ -418,6 +419,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
 	send_gs_msg(sock, msg, pkt_size);
       }
+      pthread_mutex_unlock(&s->wm_mutex);
     }
       
     pkt_size = 0;
@@ -465,6 +467,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     game = tok_array[1];
 
     /* User stat lookup for each user */
+    pthread_mutex_lock(&s->wm_mutex);
     player_t *pl_lookup = find_user(s, username);
     if (pl_lookup != NULL) {
       pkt_size = create_playerpoints(&msg[6], pl_lookup->username, pl_lookup->points, pl_lookup->trophies, game);
@@ -475,14 +478,15 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
       send_gs_msg(sock, msg, pkt_size);
     }
+    pthread_mutex_unlock(&s->wm_mutex);
     
     pkt_size = 0;
     break;
   case DISCONNECTSESSION:
-    gs_info("%s disconnected from session", pl->username);
+    gs_info("waitmod: %s disconnected from session", pl->username);
     break;
   default:
-    gs_info("Flag not supported %02x", recv_flag);
+    gs_info("waitmod: Flag not supported %02x", recv_flag);
     return 0;
   }
  
