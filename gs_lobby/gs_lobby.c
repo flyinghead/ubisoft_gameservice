@@ -154,12 +154,17 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
     perror("pipe2");
     pipefd[0] = pipefd[1] = -1;
   }
-  char arg_1[258], arg_2[258], arg_3[258], arg_4[258], arg_5[258], arg_6[258];
+  char arg_1[16], arg_2[16], arg_3[32], arg_4[258], arg_5[16], arg_6[32];
   sprintf(arg_1, "-p %d", sess->session_gameport);
   sprintf(arg_2, "-n %d", s->server_type == SDO_SERVER ? sess->session_max_players : sess->session_nb_players);
   sprintf(arg_3, "-m%s", sess->session_master);
   sprintf(arg_4, "-d%s", s->server_db_path);
   sprintf(arg_5, "-t %d", s->server_type);
+  char *argv[] = { "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, NULL, NULL };
+  int argc = 7;
+  if (!strcmp("SDODC", sess->session_game))
+    /* dump received data */
+    argv[argc++] = "-v";
 
   if (!(pid = fork())) {
     if (!fork()) {
@@ -168,14 +173,10 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
        */
       int wpipefd = dup(pipefd[1]);
       sprintf(arg_6, "-i %d", wpipefd);
-      gs_info("Starting GameServer with args %s %s %s %s %s %s",
-	      arg_1,
-	      arg_2,
-	      arg_3,
-	      arg_4,
-	      arg_5,
-		  arg_6);
-      execle("gs_gameserver", "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, (char *)0, NULL);
+      gs_info("Starting GameServer with args %s %s %s %s %s %s %s",
+	      arg_1, arg_2, arg_3, arg_4,
+	      arg_5, arg_6, argc >= 8 ? argv[7] : "");
+      execve("gs_gameserver", argv, NULL);
     } else {
       exit(0);
     }

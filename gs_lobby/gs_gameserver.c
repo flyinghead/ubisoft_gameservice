@@ -38,6 +38,7 @@
 
 uint32_t serverSeq = 1;
 server_data_t server_data;
+FILE *udp_dump;
 
 void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;
@@ -1398,7 +1399,15 @@ void *gameserver_udp_server_handler(void *data) {
 	gs_error("GAMESERVER%d - ERROR in recvfrom", s_data->game_tcp_port);
 	break;
       }
-      
+      if (udp_dump != NULL)
+      {
+	time_t now = get_time_ms();
+	fwrite(&now, sizeof(now), 1, udp_dump);
+	fwrite(&client.sin_addr.s_addr, 4, 1, udp_dump);
+	fwrite(&client.sin_port, 2, 1, udp_dump);
+	fwrite(&read_size, 4, 1, udp_dump);
+	fwrite(c_msg, 1, (size_t)read_size, udp_dump);
+      }
       udp_msg_handler(c_msg, (int)read_size, s_data, &client);
       memset(c_msg, 0, sizeof(c_msg));
     }
@@ -1478,14 +1487,19 @@ void *gs_gameserver_client_handler(void *data) {
   return 0;
 }
 
-void signal_handler(int s) {
+static void signal_handler(int s) {
   gs_info("GAMESERVER%d - Caught signal %d. Exiting", server_data.game_tcp_port, s);
   exit(0);
 }
 
-void delete_pidfile() {
+static void delete_pidfile() {
   if (remove(server_data.pidfile) != 0)
     gs_error("GAMESERVER%d - Could not remove %s", server_data.game_tcp_port, server_data.pidfile);
+}
+
+static void close_udp_dump() {
+  if (udp_dump != NULL)
+    fclose(udp_dump);
 }
 
 int main (int argc, char *argv[]) {
@@ -1496,7 +1510,7 @@ int main (int argc, char *argv[]) {
   char *master = NULL, *db_path = NULL;
   
   server_data.lobby_pipe = -1;
-  while ((opt = getopt (argc, argv, "p:n:m:d:t:i:")) != -1) {
+  while ((opt = getopt (argc, argv, "p:n:m:d:t:i:v")) != -1) {
     switch (opt) {
     case 'p':
       port = (uint16_t)str2int(optarg);
@@ -1523,6 +1537,17 @@ int main (int argc, char *argv[]) {
       break;
     case 'i':
       server_data.lobby_pipe = str2int(optarg);
+      break;
+    case 'v':
+      {
+	char fname[128];
+	sprintf(fname, "racedata-%d.bin", getpid());
+	udp_dump = fopen(fname, "w");
+	if (udp_dump != NULL) {
+	  gs_info("Dumping race data to %s", fname);
+	  atexit(close_udp_dump);
+	}
+      }
       break;
     }
   }
