@@ -27,7 +27,6 @@
 #include <netinet/tcp.h>
 #include <string.h>
 #include <pthread.h>
-#include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -87,12 +86,13 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
   }
 }
 
-void send_udp_player(player_t *player, char* msg, uint16_t pkt_size) {
-  uint24_to_char(player->udp_client_seq, &msg[3]);
-  player->udp_client_seq &= 0x7fffff;
-  uint16_to_char(player->udp_last_time, &msg[8]);
+void send_udp_player(player_t *player, char* msg, uint16_t pkt_size)
+{
+  uint24_to_char(player->udp.client_seq, &msg[3]);
+  player->udp.client_seq &= 0x7fffff;
+  uint16_to_char(player->udp.last_time, &msg[8]);
   sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
-	     (struct sockaddr*)&player->udp_addr,
+	     (struct sockaddr*)&player->udp.addr,
 	     (socklen_t)sizeof(struct sockaddr_in));
 }
 
@@ -290,10 +290,10 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
   memset(pl->username, 0, MAX_UNAME_LEN);
 
   pl->is_master = 0;
-  pl->udp_ready = 0;
-  pl->udp_client_seq = 0;
-  pl->udp_last_time = 0;
-  pl->udp_last_update = 0;
+  pl->udp.ready = 0;
+  pl->udp.client_seq = 0;
+  pl->udp.last_time = 0;
+  pl->udp.last_update = 0;
   pl->player_id = 0;
   
   pthread_mutex_lock(&s->mutex);
@@ -982,26 +982,26 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       //        0=clear    0=day            3=std           players       car   driver
       //        1=cloudy   1=dusk           4=trial                       class class
       //        ...        ...
-      strlcpy(s->session_info, &buf[21], sizeof(s->session_info));
-      pkt_size = 13;
-      memcpy(msg + 8, buf + 8, pkt_size);
-      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
-      msg[5] = 0x04; // from server??
-      write(pl->sock, msg, pkt_size);
-      pkt_size = 0;
       {
+	pkt_size = (uint16_t)(13 + char_to_uint32(&buf[9]));	// session info not included
+	strlcpy(s->session_info, &buf[8 + pkt_size], sizeof(s->session_info));
+	memcpy(msg + 8, buf + 8, pkt_size);
+	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
+	msg[5] = 0x04; // from server??
+	write(pl->sock, msg, pkt_size);
     	char msg[64] = { 'S' };
-    	int len = buf_len - 0x15;
+    	int len = buf_len - pkt_size - 8;
     	if (len + 2 > sizeof(msg)) {
     	  gs_error("SDO_UPDATE_SESSION_INFO: overflow: %d bytes", len);
     	}
     	else {
     	  msg[1] = (char)len;
-    	  memcpy(&msg[2], &buf[0x15], (size_t)len);
+    	  memcpy(&msg[2], &buf[8 + pkt_size], (size_t)len);
     	  ssize_t ret = write(s->lobby_pipe, msg, (size_t)(len + 2));
     	  if (ret < 0)
     	    perror("write(pipe)");
     	}
+	pkt_size = 0;
       }
       break;
 
@@ -1233,16 +1233,16 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   }
 
   int new_connection = 0;
-  if (pl->udp_ready == 0 && pl->player_id != 0) {
-    pl->udp_addr = *client;
+  if (pl->udp.ready == 0 && pl->player_id != 0) {
+    pl->udp.addr = *client;
     new_connection = 1;
   }
 
   /* Parse header */
   time_t now = get_time_ms();
-  pl->udp_client_seq = (pl->udp_client_seq & 0x800000) | char_to_uint24(&buf[0]);
-  pl->udp_last_time = char_to_uint16(&buf[6]);
-  pl->udp_last_update = now;
+  pl->udp.client_seq = (pl->udp.client_seq & 0x800000) | char_to_uint24(&buf[0]);
+  pl->udp.last_time = char_to_uint16(&buf[6]);
+  pl->udp.last_update = now;
   char *p = &buf[10];
   while (p - buf < buf_len)
   {
@@ -1259,12 +1259,12 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	  case EVENT_UDPCONNECT:
 	    if (new_connection) /* s->max_players == s->current_nr_of_players) */ {
 		gs_info("Got UDPCONNECT");
-		pl->udp_ready = 1;
-		pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
-		pl->udp_client_seq &= 0x7fffff;
-		uint16_to_char(pl->udp_last_time, &msg[8]);
+		pl->udp.ready = 1;
+		pkt_size = create_gameserver_udp_hdr(msg, pl->udp.client_seq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
+		pl->udp.client_seq &= 0x7fffff;
+		uint16_to_char(pl->udp.last_time, &msg[8]);
 		sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-		       (struct sockaddr*)&pl->udp_addr,
+		       (struct sockaddr*)&pl->udp.addr,
 		       (socklen_t)sizeof(struct sockaddr_in));
 
 		pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
@@ -1282,11 +1282,11 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	      uint32_t rate = char_to_uint32(p - 4);
 	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
 	      uint32_to_char(rate, &msg[14]);
-	      pkt_size = create_gameserver_udp_hdr(msg, pl->udp_client_seq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
-	      pl->udp_client_seq &= 0x7fffff;
-	      uint16_to_char(pl->udp_last_time, &msg[8]);
+	      pkt_size = create_gameserver_udp_hdr(msg, pl->udp.client_seq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
+	      pl->udp.client_seq &= 0x7fffff;
+	      uint16_to_char(pl->udp.last_time, &msg[8]);
 	      sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-		     (struct sockaddr*)&pl->udp_addr,
+		     (struct sockaddr*)&pl->udp.addr,
 		     (socklen_t)sizeof(struct sockaddr_in));
 	    }
 	    break;
@@ -1310,7 +1310,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   for (int i = 0; i < (int)s->max_players; i++)
   {
     player_t *player = s->p_l[i];
-    if (player && player->udp_last_update != 0 && (now - player->udp_last_update) >= 30000) {
+    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 30000) {
       gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
       /* Notify lobby to remove player from session */
       lobby_kick_player(s, player->player_id);

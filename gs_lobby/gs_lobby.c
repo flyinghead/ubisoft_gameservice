@@ -234,17 +234,14 @@ void *keepalive_server_handler(void *data)
 {
   server_data_t *s = (server_data_t *)data;
   int i=0;
-  uint32_t now=0, duration=0;
-  time_t seconds=0;
   int ping_count;
   struct sockaddr_in ping_addresses[100];
   int ping_values[100];
     
   while(1) {
-    seconds = time(NULL);
-    now = (uint32_t)(seconds);
     ping_count = 0;
     pthread_mutex_lock(&s->mutex);
+    time_t now = time(NULL);
     for(i=0; i < (s->max_players); i++) {
       player_t *player = s->server_p_l[i];
       if (player == NULL)
@@ -253,7 +250,7 @@ void *keepalive_server_handler(void *data)
       if (now - player->keepalive > 300) {
           gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
 		  player->username,
-		  now - player->keepalive);
+		  (int)(now - player->keepalive));
           /* will make the client thread delete the player and exit */
           shutdown(player->sock, SHUT_RDWR);
           continue;
@@ -293,9 +290,9 @@ void *keepalive_server_handler(void *data)
 	if (s->server_type == POD_SERVER && s->s_l[i]->session_id == s->chatgroup_id)
 	  continue;
 
-	duration = now - (s->s_l[i]->session_duration);
+	int duration = (int)(now - s->s_l[i]->session_start);
 	/* Remove session that have been active for longer then 60 sec but have 0 members */
-	if ((duration > 60) && (s->s_l[i]->session_nb_players == 0)) {
+	if (duration > 60 && s->s_l[i]->session_nb_players == 0) {
 	  gs_info("[LOBBY] - Removed empty session %s after 60 sec", s->s_l[i]->session_name);
 	  remove_server_session(s, s->s_l[i]);
 	}
@@ -338,7 +335,6 @@ void send_other_players_in_lobby(server_data_t *s, player_t* pl, char* msg) {
     /* Send to other players which is not in a game */
     player_t *player = s->server_p_l[i];
     if (player &&
-	player->in_game == 0 &&
 	player->player_id != pl->player_id) {
       pkt_size = create_joinnew(&msg[6], player->username, s->basicgroup_id);
       pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
@@ -550,9 +546,12 @@ void remove_server_session(server_data_t *s, session_t *sess) {
 	if (sess->gameserver_pipe != -1) {
 	  close(sess->gameserver_pipe);
 	  /* Avoid deadlock with pipe thread */
-	  pthread_mutex_unlock(&s->mutex);
+	  int lock_count = 0;
+	  while (pthread_mutex_unlock(&s->mutex) == 0)
+	    lock_count++;
 	  pthread_join(sess->pipe_thread, NULL);
-	  pthread_mutex_lock(&s->mutex);
+	  while (lock_count-- > 0)
+	    pthread_mutex_lock(&s->mutex);
 	}
 	free(s->s_l[i]->p_l);
 	free(s->s_l[i]);
@@ -691,8 +690,7 @@ int add_server_session(server_data_t *s,
   sess->session_pgroupid = session_pgroupid;
 
   //Set timestamp
-  time_t seconds = time(NULL);  
-  sess->session_duration = (uint32_t)seconds;
+  sess->session_start = time(NULL);
 
   sess->session_config = 0;
   sess->session_unknown_1 = session_unknown_1;
@@ -756,7 +754,6 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
   char *tok_array[256] =  { NULL };
   uint32_t byte_array[256] = { 0 };
   int pos = 0, nr_s_parsed = 0, nr_b_parsed = 0;
-  time_t seconds = 0;
   uint32_t groupid = 0, binLen = 0;
   session_t *sess = NULL;
   int i;
@@ -1140,9 +1137,8 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pkt_size = 0 ;
     break;;   
   case STILLALIVE:
-    seconds = time(NULL);
     //Set new keepalive stamp
-    pl->keepalive = (uint32_t)seconds;
+    pl->keepalive = time(NULL);
     pkt_size = create_gs_hdr(msg, STILLALIVE, 0x24, pkt_size);
     send_gs_msg(sock, msg, pkt_size);
 
@@ -1263,7 +1259,6 @@ void *gs_server_handler(void* data) {
   server_data_t *s_data = (server_data_t *)data;
   int socket_desc , client_sock , c, optval;
   struct sockaddr_in server = { 0 }, client = { 0 };
-  time_t seconds = 0;
 
   signal(SIGPIPE, handler);
   
@@ -1323,14 +1318,13 @@ void *gs_server_handler(void* data) {
   }
   
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
-    seconds = time(NULL);
     //Store player data
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = s_data;
     pl->player_id = (uint32_t)(client_sock + 0x0100);
-    pl->keepalive = (uint32_t)seconds;
+    pl->keepalive = time(NULL);
     pl->in_session_id = 0;
     pl->in_game = 0;
     pl->trophies = 0;

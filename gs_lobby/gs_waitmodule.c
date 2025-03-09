@@ -561,7 +561,6 @@ int main(int argc, char *argv[]) {
   server_data_t s_data;
   int socket_desc , client_sock , c, optval;
   struct sockaddr_in server = { 0 }, client = { 0 };
-  time_t seconds = 0;
 
   init_server(argc, argv, &s_data);
   
@@ -600,14 +599,13 @@ int main(int argc, char *argv[]) {
   c = sizeof(struct sockaddr_in);
   
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
-    seconds = time(NULL);
     //Store player data
     player_t *pl = (player_t *)malloc(sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = &s_data;
     pl->player_id = (uint32_t)(client_sock + 0x0100);
-    pl->keepalive = (uint32_t)seconds;
+    pl->keepalive = time(NULL);
     if (!add_waitmodule_player(&s_data, pl)) {
         free(pl);
         return 0;

@@ -7,6 +7,7 @@
 #include <sqlite3.h>
 #include "../gs_common/gs_common.h"
 #include <pthread.h>
+#include <time.h>
 
 typedef struct server_data server_data_t;
 
@@ -18,7 +19,7 @@ typedef struct {
   char username[MAX_UNAME_LEN];
   uint32_t player_id;
   uint32_t in_session_id;
-  uint32_t keepalive;
+  time_t keepalive;
   uint32_t trophies;
   uint32_t points;
   server_data_t *server;
@@ -44,7 +45,7 @@ typedef struct {
   uint32_t session_unknown_2;
   uint32_t session_config;
   uint16_t session_gameport;
-  uint32_t session_duration;
+  time_t session_start;
   player_t **p_l;
   server_data_t *server;
   int gameserver_pipe;

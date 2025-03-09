@@ -47,14 +47,16 @@ typedef struct server_data server_data_t;
 typedef struct {
   int sock;
   int is_master;
-  int udp_ready;
-  uint16_t udp_last_time;
-  uint32_t udp_client_seq;
-  time_t udp_last_update;
+  struct {
+    int ready;
+    uint16_t last_time;
+    uint32_t client_seq;
+    time_t last_update;
+    struct sockaddr_in addr;
+  } udp;
   uint32_t trophies;
   uint32_t points;
   struct sockaddr_in addr;
-  struct sockaddr_in udp_addr;
   char username[MAX_UNAME_LEN];
   uint16_t player_id;
   server_data_t *server;
