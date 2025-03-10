@@ -78,7 +78,6 @@ struct server_data {
   player_t **waitmodule_p_l;
   player_t **server_p_l;
     
-  sqlite3 *db;
   pthread_mutex_t mutex;
   pthread_mutex_t wm_mutex;
 };

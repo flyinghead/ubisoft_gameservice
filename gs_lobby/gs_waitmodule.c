@@ -28,6 +28,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <signal.h>
 #include "gs_lobby.h"
 #include "gs_waitmodule.h"
 #include "gs_sql.h"
@@ -252,7 +253,7 @@ void remove_waitmodule_player(player_t *pl) {
   for(i=0;i<max_players;i++) {
     if (s->waitmodule_p_l[i] != NULL) {
       if(s->waitmodule_p_l[i]->player_id == pl->player_id) {
-	gs_info("Removed player with id: 0x%02x", pl->player_id);
+	gs_info("waitmod: removed player %s (%x)", pl->username, pl->player_id);
 	s->waitmodule_p_l[i] = NULL;
       }
     }
@@ -330,16 +331,18 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     strlcpy(pl->username, tok_array[0], strlen(tok_array[0])+1);
     gs_info("User %s is joining the waitmodule", pl->username);
 
-    /* Load player record, create if not exists */
-    s->db = open_gs_db(s->server_db_path);
-    if (s->db == NULL) {
-      gs_error("Could not connect to database");
-      exit(-1);
+    {
+      /* Load player record, create if not exists */
+      sqlite3 *db = open_gs_db(s->server_db_path);
+      if (db == NULL) {
+	gs_error("Could not connect to database");
+	exit(-1);
+      }
+      rc = load_player_record(db, pl->username, &pl->points, &pl->trophies);
+      if (rc == 2)
+	rc = create_player_record(db, pl->username, s->server_type == SDO_SERVER);
+      sqlite3_close(db);
     }
-    rc = load_player_record(s->db, pl->username, &pl->points, &pl->trophies);
-    if ( rc == 2 )
-      rc = create_player_record(s->db, pl->username, s->server_type == SDO_SERVER);
-    sqlite3_close(s->db);
 
     if (rc != 1) {
       pkt_size = create_gsfail(&msg[6], LOGINWAITMODULE, LOGIN_FAILED);
@@ -468,13 +471,29 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     /* User stat lookup for each user */
     pthread_mutex_lock(&s->wm_mutex);
-    player_t *pl_lookup = find_user(s, username);
-    if (pl_lookup != NULL) {
-      pkt_size = create_playerpoints(&msg[6], pl_lookup->username, pl_lookup->points, pl_lookup->trophies, game);
-      pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
-      send_gs_msg(sock, msg, pkt_size);
-    } else { 
-      pkt_size = create_playerpoints(&msg[6], username, (uint32_t)0, (uint32_t)0, game);
+    {
+      char scorecard[64];
+
+      player_t *pl_lookup = find_user(s, username);
+      if (pl_lookup != NULL) {
+	  if (s->server_type == SDO_SERVER) {
+	    sqlite3 *db = open_gs_db(s->server_db_path);
+	    if (db == NULL) {
+	      gs_error("Could not connect to database");
+	      exit(-1);
+	    }
+	    uint32_t class, points, cash;
+	    load_player_scorecard(db, username, &class, &points, &cash);
+	    sqlite3_close(db);
+	    sprintf(scorecard, "Class,%d|Points,%d|Money,%d", class, points, cash);
+	  }
+	  else {
+	    sprintf(scorecard, "Points,%d|Trophies,%d", pl_lookup->points, pl_lookup->trophies);
+	  }
+      } else {
+	  scorecard[0] = '\0';
+      }
+      pkt_size = create_playerpoints(&msg[6], username, game, scorecard);
       pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
       send_gs_msg(sock, msg, pkt_size);
     }
@@ -562,21 +581,20 @@ int main(int argc, char *argv[]) {
   int socket_desc , client_sock , c, optval;
   struct sockaddr_in server = { 0 }, client = { 0 };
 
+  signal(SIGPIPE, SIG_IGN);
   init_server(argc, argv, &s_data);
   
   pthread_t thread_id_server;
   if( pthread_create( &thread_id_server , NULL ,  gs_server_handler , (void*)&s_data) < 0) {
     gs_info("Could not create thread");
-    sqlite3_close(s_data.db);
-    return -1;
+    return 1;
   }
   pthread_detach(thread_id_server);
  
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
   if (socket_desc == -1) {
     gs_info("Could not create socket");
-    sqlite3_close(s_data.db);
-    return 0;
+    return 1;
   }
 
   optval = 1;
@@ -588,8 +606,7 @@ int main(int argc, char *argv[]) {
   
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
     gs_error("Bind failed. Error");
-    sqlite3_close(s_data.db);
-    return 0;
+    return 1;
   }
   gs_info("Waitmodule TCP listener on port: %d", ntohs(server.sin_port));
   
@@ -608,21 +625,20 @@ int main(int argc, char *argv[]) {
     pl->keepalive = time(NULL);
     if (!add_waitmodule_player(&s_data, pl)) {
         free(pl);
-        return 0;
+        close(client_sock);
+        continue;
     }
     
     if( pthread_create( &thread_id , NULL ,  gs_waitmodule_client_handler , (void*)pl) < 0) {
       gs_error("Could not create thread");
-      sqlite3_close(s_data.db);
-      return 0;
+      return 1;
     }
     pthread_detach(thread_id);
   }
   
   if (client_sock < 0) {
     gs_error("Accept failed");
-    sqlite3_close(s_data.db);
-    return 0;
+    return 1;
   }
 
   gs_info("Exiting waitmodule");

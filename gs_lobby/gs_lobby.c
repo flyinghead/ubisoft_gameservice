@@ -27,7 +27,6 @@
 #include <netinet/tcp.h>
 #include <string.h>
 #include <pthread.h>
-#include <signal.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -38,19 +37,14 @@
 #include "../gs_common/gs_msg.h"
 
 #define GS_PORT_OFFSET 30000
-#define SESSION_LOCKED 8
+#define SESSION_LOCKED 0x08
 #define SESSION_WAITING 0x10
-#define PASSWORD_PROTECTED 15
+#define PASSWORD_PROTECTED 0x0F
 
 /* returns 1 if the user's current session was deleted because empty */
 int player_cleanup(server_data_t *s, player_t *pl);
-void remove_server_player(player_t *pl);
 void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size);
 void remove_server_session(server_data_t *s, session_t *sess);
-
-void handler(int s) {
-  gs_info("Caught a SIGPIPE");
-}
 
 int file_exists(char* filename) {
   struct stat buffer;
@@ -82,6 +76,32 @@ uint16_t get_available_gameserver_port(server_data_t *s, session_t *sess) {
   return 0;
 }
 
+static uint16_t create_sessionnew(char* msg, session_t *sess) {
+  int pkt_size = 0;
+
+  //SessionName, GroupId, PGroupID, MaxP, MaxO, NrP, NrO
+  pkt_size += sprintf(&msg[pkt_size], "s%s", sess->session_name);
+  pkt_size++;
+  pkt_size += bin32_to_msg(sess->session_id, &msg[pkt_size]);
+  pkt_size += bin32_to_msg(sess->session_groupid, &msg[pkt_size]);
+  pkt_size += bin32_to_msg(sess->session_max_players, &msg[pkt_size]);
+  pkt_size += bin32_to_msg(sess->session_max_observers, &msg[pkt_size]);
+  pkt_size += bin32_to_msg(sess->session_nb_players, &msg[pkt_size]);
+  pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
+  pkt_size += sprintf(&msg[pkt_size], "s%s", sess->session_master);
+  pkt_size++;
+  pkt_size += bin32_to_msg(sess->session_config, &msg[pkt_size]);
+  pkt_size += sprintf(&msg[pkt_size], "s%s", sess->session_gameinfo);
+  pkt_size++;
+  pkt_size += sprintf(&msg[pkt_size], "s%s", sess->session_game);
+  pkt_size++;
+  //pkt_size += sprintf(&msg[pkt_size], "s%s", sess->server->allowedbranch);
+  //pkt_size++;
+
+  return (uint16_t)pkt_size;
+}
+
+
 void *gameserver_pipe_handler(void *data) {
   session_t *sess = (session_t *)data;
   for (;;)
@@ -92,7 +112,7 @@ void *gameserver_pipe_handler(void *data) {
     int update_config = 0;
     switch (c) {
       case 'L':
-        if (sess->session_config == SESSION_WAITING) {
+        if (sess->session_config & SESSION_WAITING) {
     	  sess->session_config = SESSION_LOCKED;
     	  update_config = 1;
         }
@@ -100,13 +120,17 @@ void *gameserver_pipe_handler(void *data) {
       case 'U':
     	if (sess->session_config == SESSION_LOCKED) {
     	  sess->session_config = SESSION_WAITING;
+    	  if (sess->session_password[0] != '\0')
+    	    sess->session_config |= PASSWORD_PROTECTED;
     	  update_config = 1;
     	}
     	break;
       case 'S':
         if (read(sess->gameserver_pipe, &c, 1) == 1
-            && c <= sizeof(sess->session_gameinfo))
+            && c <= sizeof(sess->session_gameinfo)) {
           read(sess->gameserver_pipe, sess->session_gameinfo, (size_t)c);
+	  sscanf(sess->session_gameinfo, "%*d %*d %*d %*d %*d %*d %d", &sess->session_max_players);
+        }
     	break;
       case 'K':
 	{
@@ -469,7 +493,7 @@ void remove_server_player(player_t *pl) {
     if (s->server_p_l[i] && s->server_p_l[i]->player_id == pl->player_id) {
       s->group_size = s->group_size - 1;
       player_cleanup(s, pl);
-      gs_info("Removed player with id: 0x%02x", pl->player_id);
+      gs_info("lobby: removed player %s (%x)", pl->username, pl->player_id);
       close(s->server_p_l[i]->sock);
       s->server_p_l[i] = NULL;
       break;
@@ -863,7 +887,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	pthread_mutex_unlock(&s->mutex);
 	return pkt_size;
       }
-      if (sess->session_config == PASSWORD_PROTECTED) {
+      if ((sess->session_config & PASSWORD_PROTECTED) == PASSWORD_PROTECTED) {
 	gs_info("Session is password protected");
 	if ( (strcmp(tok_array[0], sess->session_password)) != 0 ) {
 	  gs_info("Incorrect password");
@@ -937,7 +961,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 	pkt_size = create_gs_hdr(msg, JOINLEAVE, 0x24, pkt_size);
 	send_msg_to_others_in_lobby(s, pl, msg, pkt_size);
       }
-      else if (sess->session_config == SESSION_WAITING) {
+      else if (sess->session_config & SESSION_WAITING) {
 	// needed to avoid hang on Connecting to the waiting room...
 	pkt_size = create_startgame(&msg[6], groupid, s->server_ip, sess->session_gameport);
 	pkt_size = create_gs_hdr(msg, STARTGAME, 0x24, pkt_size);
@@ -955,19 +979,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     if (groupid == s->basicgroup_id) {
       for (i = 0; i < s->max_sessions; i++) {
 	if (s->s_l[i]) {
-	  pkt_size = create_sessionnew(&msg[6],
-				       s->s_l[i]->session_name,
-				       s->s_l[i]->session_game,
-				       s->allowedbranch,
-				       s->s_l[i]->session_gameinfo,
-				       s->s_l[i]->session_master,
-				       s->s_l[i]->session_id,
-				       s->s_l[i]->session_groupid,
-				       s->s_l[i]->session_nb_players,
-				       s->s_l[i]->session_max_players,
-				       s->s_l[i]->session_max_observers,
-				       s->s_l[i]->session_config
-				       );
+	  pkt_size = create_sessionnew(&msg[6], s->s_l[i]);
 	  pkt_size = create_gs_hdr(msg, SESSIONNEW, 0x24, pkt_size);
 	  send_gs_msg(sock, msg, pkt_size);
 	}
@@ -1021,19 +1033,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x24, pkt_size);
     send_gs_msg(sock, msg, pkt_size);
 
-    pkt_size = create_sessionnew(&msg[6],
-				 sess->session_name,
-				 sess->session_game,
-				 s->allowedbranch,
-				 sess->session_gameinfo,
-				 sess->session_master,
-				 sess->session_id,
-				 sess->session_groupid,
-				 sess->session_nb_players,
-				 sess->session_max_players,
-				 sess->session_max_observers,
-				 sess->session_config
-				 );
+    pkt_size = create_sessionnew(&msg[6], sess);
     pkt_size = create_gs_hdr(msg, SESSIONNEW, 0x24, pkt_size);
     send_msg_to_lobby(s, msg, pkt_size);
     pthread_mutex_unlock(&s->mutex);
@@ -1160,19 +1160,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     pthread_mutex_lock(&s->mutex);
     for (i = 0; i < s->max_sessions; i++) {
       if (s->s_l[i]) {
-	pkt_size = create_sessionnew(&msg[6],
-				     s->s_l[i]->session_name,
-				     s->s_l[i]->session_game,
-				     s->allowedbranch,
-				     s->s_l[i]->session_gameinfo,
-				     s->s_l[i]->session_master,
-				     s->s_l[i]->session_id,
-				     s->s_l[i]->session_groupid,
-				     s->s_l[i]->session_nb_players,
-				     s->s_l[i]->session_max_players,
-				     s->s_l[i]->session_max_observers,
-				     s->s_l[i]->session_config
-				     );
+	pkt_size = create_sessionnew(&msg[6], s->s_l[i]);
 	pkt_size = create_gs_hdr(msg, SESSIONNEW, 0x24, pkt_size);
 	send_gs_msg(sock, msg, pkt_size);
       }
@@ -1260,8 +1248,6 @@ void *gs_server_handler(void* data) {
   int socket_desc , client_sock , c, optval;
   struct sockaddr_in server = { 0 }, client = { 0 };
 
-  signal(SIGPIPE, handler);
-  
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
   if (socket_desc == -1) {
     gs_info("Could not create socket");

@@ -28,3 +28,4 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
 int load_best_lap(sqlite3 *db, int track, int mode);
 int load_sdo_track_record(sqlite3 *db, char *username, int track, int mode, int class, char *buf);
 int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *buf);
+int load_player_scorecard(sqlite3 *db, const char* username, uint32_t *class, uint32_t *points, uint32_t *cash);

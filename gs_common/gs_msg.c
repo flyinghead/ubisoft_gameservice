@@ -178,7 +178,7 @@ uint16_t create_createsession(char* msg, char* session_name, uint32_t session_id
 }
 
 // [%s, %s, %s] 
-uint16_t create_playerpoints(char* msg, char* username, uint32_t points, uint32_t trophies, char* game) {
+uint16_t create_playerpoints(char* msg, const char* username, const char* game, const char *points) {
   int pkt_size = 0;
 
   pkt_size += bin8_to_msg((uint8_t)SCORECARD, &msg[pkt_size]);
@@ -187,7 +187,7 @@ uint16_t create_playerpoints(char* msg, char* username, uint32_t points, uint32_
   pkt_size++;  
   pkt_size += sprintf(&msg[pkt_size], "s%s", game);
   pkt_size++;
-  pkt_size += sprintf(&msg[pkt_size], "sPoints,%d|Trophies,%d", points, trophies);
+  pkt_size += sprintf(&msg[pkt_size], "s%s", points);
   pkt_size++;
   pkt_size += sprintf(&msg[pkt_size], "%s", "]"); 
 
@@ -251,31 +251,6 @@ uint16_t create_joinleave(char* msg, char* username, uint32_t group_id) {
   return (uint16_t)pkt_size;
 }
 
-
-//SessionName, GroupId, PGroupID, MaxP, MaxO, NrP, NrO
-uint16_t create_sessionnew(char* msg, char* name, char* game, char* allowedbranch, char* gameinfo, char *master, uint32_t session_id, uint32_t group_id, uint32_t nb_of_players, uint32_t max_players, uint32_t max_observers, uint32_t config) {
-  int pkt_size = 0;
-
-  pkt_size += sprintf(&msg[pkt_size], "s%s", name);
-  pkt_size++;
-  pkt_size += bin32_to_msg(session_id, &msg[pkt_size]);
-  pkt_size += bin32_to_msg(group_id, &msg[pkt_size]);
-  pkt_size += bin32_to_msg(max_players, &msg[pkt_size]);
-  pkt_size += bin32_to_msg(max_observers, &msg[pkt_size]);
-  pkt_size += bin32_to_msg(nb_of_players, &msg[pkt_size]);
-  pkt_size += bin32_to_msg((uint32_t)0, &msg[pkt_size]);
-  pkt_size += sprintf(&msg[pkt_size], "s%s", master);
-  pkt_size++;
-  pkt_size += bin32_to_msg((uint32_t)config, &msg[pkt_size]);
-  pkt_size += sprintf(&msg[pkt_size], "s%s", gameinfo);
-  pkt_size++;
-  pkt_size += sprintf(&msg[pkt_size], "s%s", game);
-  pkt_size++;
-  //pkt_size += sprintf(&msg[pkt_size], "s%s", allowedbranch);
-  //pkt_size++;
-  
-  return (uint16_t)pkt_size;
-}
 
 // Group GroupId PGroupId  MaxP  MaxV  NbP  NbV  Master  Config  Info Game AllowedBranch
 //  %s     %ld     %ld     %ld   %ld   %ld  %ld    %s     %ld     %s   %s       %s       

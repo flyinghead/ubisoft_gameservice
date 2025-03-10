@@ -1603,3 +1603,30 @@ exit:
   return 4;
 }
 
+int load_player_scorecard(sqlite3 *db, const char* username, uint32_t *class, uint32_t *points, uint32_t *cash)
+{
+  *class = *points = *cash = 0;
+  sqlite3_stmt *pStmt;
+  if (sqlite3_prepare_v2(db, "SELECT CLASS, DRIVING_POINTS, CASH "
+      "FROM PLAYER_DATA WHERE USERNAME = trim(?)", -1, &pStmt, 0) != SQLITE_OK) {
+    gs_error("Prepare SQL error");
+    return -1;
+  }
+  int ret = -1;
+  int rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    gs_error("Bind username failed error: %d", rc);
+    goto exit;
+  }
+  rc = sqlite3_step(pStmt);
+  if (rc == SQLITE_ROW) {
+    *class = (uint32_t)sqlite3_column_int(pStmt, 0);
+    *points = (uint32_t)sqlite3_column_int(pStmt, 1);
+    *cash = (uint32_t)sqlite3_column_int(pStmt, 2);
+  }
+  ret = 0;
+
+exit:
+  sqlite3_finalize(pStmt);
+  return ret;
+}

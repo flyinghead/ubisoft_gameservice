@@ -983,21 +983,27 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       //        1=cloudy   1=dusk           4=trial                       class class
       //        ...        ...
       {
-	pkt_size = (uint16_t)(13 + char_to_uint32(&buf[9]));	// session info not included
-	strlcpy(s->session_info, &buf[8 + pkt_size], sizeof(s->session_info));
+	unsigned idx = 9;
+	uint32_t passwd_size = char_to_uint32(&buf[idx]);
+	idx += 4 + passwd_size;
+	//uint32_t max_players = char_to_uint32(&buf[idx]);
+	idx += 4;
+	idx += 4; // unknown
+	strlcpy(s->session_info, &buf[idx], sizeof(s->session_info));
+	pkt_size = (uint16_t)(idx - 8);	// session info not included
 	memcpy(msg + 8, buf + 8, pkt_size);
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UPDATE_SESSION_INFO, SENDTOPLAYER, pkt_size);	// send back beginning of packet
 	msg[5] = 0x04; // from server??
 	write(pl->sock, msg, pkt_size);
     	char msg[64] = { 'S' };
-    	int len = buf_len - pkt_size - 8;
+    	unsigned len = (unsigned)buf_len - idx;
     	if (len + 2 > sizeof(msg)) {
     	  gs_error("SDO_UPDATE_SESSION_INFO: overflow: %d bytes", len);
     	}
     	else {
     	  msg[1] = (char)len;
-    	  memcpy(&msg[2], &buf[8 + pkt_size], (size_t)len);
-    	  ssize_t ret = write(s->lobby_pipe, msg, (size_t)(len + 2));
+    	  memcpy(&msg[2], &buf[idx], len);
+    	  ssize_t ret = write(s->lobby_pipe, msg, len + 2);
     	  if (ret < 0)
     	    perror("write(pipe)");
     	}
