@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <netinet/tcp.h>
+#include <netinet/ip_icmp.h>
 #include <string.h>
 #include <pthread.h>
 #include <sys/wait.h>
@@ -169,7 +170,7 @@ void *gameserver_pipe_handler(void *data) {
   return NULL;
 }
 
-void safe_fork_gameserver(server_data_t* s, session_t *sess) {
+static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   pid_t pid;
   int status;
   int pipefd[2];
@@ -214,44 +215,105 @@ void safe_fork_gameserver(server_data_t* s, session_t *sess) {
       gs_error("Could not create thread");
     waitpid(pid, &status, 0);
   }
-  sleep(3);
 }
 
-int tcp_ping(const struct sockaddr_in *addr)
+static uint16_t icmp_cksum(const uint16_t *addr, int len)
 {
-  int sock = socket(AF_INET, SOCK_STREAM, 0);
-  if (sock == -1)
-    return -1;
-  int flags = fcntl(sock, F_GETFL, IPPROTO_TCP);
+  int sum = 0;
+
+  while (len > 1)  {
+      sum += *addr++;
+      len -= 2;
+  }
+  if (len == 1)
+    sum += *(uint8_t *)addr;
+
+  sum = (sum >> 16) + (sum & 0xffff);	/* add hi 16 to low 16 */
+  sum += (sum >> 16);			/* add carry */
+  return (uint16_t)~sum;		/* one-complement and truncate to 16 bits */
+}
+
+static int icmp_ping(const struct sockaddr_in *addr)
+{
+  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+  if (sock == -1) {
+      gs_error("Can't create ICMP socket");
+      return -1;
+  }
+  int flags = fcntl(sock, F_GETFL, IPPROTO_ICMP);
   fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
-  struct sockaddr_in laddr = *addr;
-  laddr.sin_port = htons(80);
+#define DATALEN 56
+#define MAXIPLEN 60
+#define MAXICMPLEN 76
+  uint8_t packet[DATALEN + MAXIPLEN + MAXICMPLEN];
+  struct icmphdr *icp = (struct icmphdr *)packet;
 
+  /* We are sending a ICMP_ECHO ICMP packet */
+  icp->type = ICMP_ECHO;
+  icp->code = 0;
+  icp->checksum = 0;
+  icp->un.echo.sequence = htons(1);
+  /* We don't set the echo.id here since IPPROTO_ICMP does it for us
+   * it sets it to the source port
+   * pfh.icmph.un.echo.id = inet->inet_sport;
+   */
+
+  /* compute ICMP checksum here */
+  int cc = DATALEN + 8;
+  icp->checksum = icmp_cksum((uint16_t *)icp, cc);
+
+  /* send the ICMP packet*/
   time_t t0 = get_time_ms();
+  ssize_t i = sendto(sock, icp, (size_t)cc, 0, (struct sockaddr*)addr, sizeof(*addr));
+  if (i != cc) {
+      perror("ICMP sendto");
+      close(sock);
+      return -1;
+  }
 
-  int ret = connect(sock, (struct sockaddr *)&laddr, sizeof(laddr));
-  if (ret && errno != EINPROGRESS) {
-    close(sock);
-    return -1;
+  /* read the reply */
+  int ping = -1;
+  while (1) {
+    time_t now = get_time_ms();
+    if (now - t0 >= 1000)
+      break;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(sock, &rfds);
+    struct timeval tv;
+    if (now == t0) {
+	tv.tv_sec = 1;
+	tv.tv_usec = 0;
+    }
+    else {
+	tv.tv_sec = 0;
+	tv.tv_usec = (1000 - (now - t0)) * 1000;
+    }
+    int ret = select(sock + 1, &rfds, NULL, NULL, &tv);
+    if (ret <= 0)
+	/* timeout or error */
+	break;
+
+    cc = (int)recv(sock, packet, sizeof(packet), 0);
+    if (cc < 0 ){
+	perror("ICMP recv");
+	break;
+    }
+    if (cc < ICMP_MINLEN)
+      /* too small: ignore */
+      continue;
+    struct icmphdr *icp_reply = (struct icmphdr *)packet;
+    if (icp_reply->type == ICMP_ECHOREPLY) {
+	time_t t1 = get_time_ms();
+	//printf("Reply of %d bytes received in %ld ms\n", cc, t1 - t0);
+	//printf("icmp_seq = %u\n", ntohs(icp_reply->un.echo.sequence));
+	ping = (int)(t1 - t0);
+	break;
+    }
   }
-  fd_set rfds, wfds;
-  FD_ZERO(&rfds);
-  FD_ZERO(&wfds);
-  FD_SET(sock, &rfds);
-  FD_SET(sock, &wfds);
-  struct timeval tv;
-  tv.tv_sec = 1;
-  tv.tv_usec = 0;
-  ret = select(sock + 1, &rfds, &wfds, NULL, &tv);
-  if (ret <= 0) {
-    /* timeout or error */
-    close(sock);
-    return -1;
-  }
-  time_t t1 = get_time_ms();
   close(sock);
-  return (int)(t1 - t0);
+  return ping;
 }
 
 void *keepalive_server_handler(void *data)
@@ -288,7 +350,7 @@ void *keepalive_server_handler(void *data)
     pthread_mutex_unlock(&s->mutex);
 
     for (i = 0; i < ping_count; i++)
-      ping_values[i] = tcp_ping(&ping_addresses[i]);
+      ping_values[i] = icmp_ping(&ping_addresses[i]);
 
     pthread_mutex_lock(&s->mutex);
     for (i = 0; i < s->max_players; i++) {
@@ -859,7 +921,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
     /* calculate our ping now so we don't lock the entire server */
     if (pl->ping == 10)
     {
-      int ping = tcp_ping(&pl->addr);
+      int ping = icmp_ping(&pl->addr);
       pl->ping = (uint8_t)(ping == -1 ? 10 : ping / 100);
     }
 
