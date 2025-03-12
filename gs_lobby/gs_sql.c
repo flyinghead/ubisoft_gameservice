@@ -35,13 +35,22 @@ typedef struct {
 
 static int load_world_record(sqlite3 *db, int track, int mode, const char *column, const char *minmax);
 
+static void sql_error(sqlite3 *db, const char *what)
+{
+  const char *errmsg = sqlite3_errmsg(db);
+  if (errmsg == NULL)
+    gs_error("%s: sqlite3 error %d", what, sqlite3_extended_errcode(db));
+  else
+    gs_error("%s: %s", what, errmsg);
+}
+
 sqlite3* open_gs_db(const char* db_path) {
    sqlite3 *db = NULL;
    int rc = 0;
    rc = sqlite3_open_v2(db_path, &db,
 		   SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL);
    if(rc) {
-     gs_error("Can't open database: %s", sqlite3_errmsg(db));
+     sql_error(db, "Can't open database");
      return NULL;
    }
 
@@ -57,31 +66,31 @@ static void create_player_cars(sqlite3* db, int playerId)
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
-    return;
+      sql_error(db, "Prepare SQL error");
+      sqlite3_finalize(pStmt);
+      return;
   }
   rc = sqlite3_bind_int(pStmt, 1, playerId);
   if (rc != SQLITE_OK) {
-    sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
-    return;
+      sql_error(db, "Bind int failed");
+      sqlite3_finalize(pStmt);
+      return;
   }
   for (int carnum = 0; carnum < 10; carnum++)
   {
     rc = sqlite3_bind_int(pStmt, 2, carnum);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int failed error: %d", rc);
-      break;
+	sql_error(db, "Bind int failed");
+	break;
     }
     rc = sqlite3_step(pStmt);
     if (rc != SQLITE_DONE) {
-      gs_error("Insert failed error: %d", rc);
-      break;
+	sql_error(db, "Insert failed");
+	break;
     }
     if (sqlite3_reset(pStmt) != SQLITE_OK) {
-      gs_error("Can't reset the statement: %d", rc);
-      break;
+	sql_error(db, "Can't reset the statement");
+	break;
     }
   }
   sqlite3_finalize(pStmt);
@@ -95,21 +104,21 @@ int create_player_record(sqlite3* db, const char* username, int sdo) {
   
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error( "Prepare SQL error: %d", rc);
     return 0;
   }
   
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Insert failed error: %d", rc);
+    sql_error(db, "Insert failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -135,35 +144,35 @@ int create_lap_record(sqlite3* db, const char* username, const char* trackname, 
 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error( "Prepare SQL error: %d", rc);
     return 0;
   }
 
    rc = sqlite3_bind_text(pStmt, 1, trackname, (int)strlen(trackname), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
   
   rc = sqlite3_bind_text(pStmt, 2, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_int(pStmt, 3, (int)laptime);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Insert failed error: %d", rc);
+    sql_error(db, "Insert failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -182,35 +191,35 @@ int create_track_record(sqlite3* db, const char* username, const char* trackname
 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error( "Prepare SQL error: %d", rc);
     return 0;
   }
 
    rc = sqlite3_bind_text(pStmt, 1, trackname, (int)strlen(trackname), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
   
   rc = sqlite3_bind_text(pStmt, 2, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_int(pStmt, 3, (int)tracktime);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Insert failed error: %d", rc);
+    sql_error(db, "Insert failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -229,35 +238,35 @@ int update_player_point(sqlite3* db, const char* username, uint32_t points, uint
 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error( "Prepare SQL error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_int(pStmt, 1, (int)points);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_int(pStmt, 2, (int)trophies);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
     return 0;
   }
   
   rc = sqlite3_bind_text(pStmt, 3, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Insert failed error: %d", rc);
+    sql_error(db, "Insert failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -278,15 +287,15 @@ int load_player_record(sqlite3 *db, const char* username, uint32_t *points, uint
   
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
   
@@ -320,8 +329,8 @@ int load_track_record(sqlite3 *db, char* msg, uint16_t max_pkt_size) {
   const char *zSql = "select T1.TRACKNAME, T1.USERNAME, MIN(T1.LAPTIME), T2.USERNAME, T2.TT from lap_data T1 join (select TRACKNAME,USERNAME,MIN(TRACKTIME) as TT from track_data group by TRACKNAME) T2 on T1.TRACKNAME = T2.TRACKNAME group by T2.TRACKNAME;"; 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
@@ -361,8 +370,8 @@ int load_topscores_record(sqlite3 *db, char* msg, uint16_t max_pkt_size) {
   const char *zSql = "SELECT USERNAME,TOTALPOINTS,TOTALTROPHIES from PLAYER_DATA ORDER BY TOTALPOINTS DESC LIMIT 10;"; 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
@@ -398,8 +407,8 @@ int load_fivescoreafter_record(sqlite3 *db, const char* username, char* msg, uin
   const char *zSql = "SELECT USERNAME,TOTALPOINTS,TOTALTROPHIES from PLAYER_DATA ORDER BY TOTALPOINTS DESC;"; 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
@@ -449,8 +458,8 @@ int load_fivescorebefore_record(sqlite3 *db, const char* username, char* msg, ui
   const char *preSql = "SELECT COUNT(*) from PLAYER_DATA;";
   rc = sqlite3_prepare_v2(db, preSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
@@ -470,8 +479,8 @@ int load_fivescorebefore_record(sqlite3 *db, const char* username, char* msg, ui
   const char *zSql = "SELECT USERNAME,TOTALPOINTS,TOTALTROPHIES from PLAYER_DATA ORDER BY TOTALPOINTS DESC;"; 
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if( rc != SQLITE_OK ){
+    sql_error(db, "Prepare SQL error");
     sqlite3_finalize(pStmt);
-    gs_error("Prepare SQL error: %d", rc);
     return 0;
   }
 
@@ -539,15 +548,15 @@ int load_player_blob(sqlite3 *db, const char* username, const char *blobname, ui
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     *size = 0;
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     *size = 0;
     return 0;
   }
@@ -589,15 +598,15 @@ int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int 
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     *size = 0;
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     *size = 0;
     return 0;
   }
@@ -643,27 +652,27 @@ int update_player_blob(sqlite3 *db, const char* username, const char *blobname, 
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     return 0;
   }
 
   rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind blob failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind blob failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 2, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
+    sql_error(db, "Update failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -679,14 +688,14 @@ int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, i
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     return 0;
   }
 
   rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind blob failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind blob failed error: %d", rc);
     return 0;
   }
   int driving_points = *(int *)&data[0];
@@ -699,33 +708,33 @@ int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, i
     class = 1;
   rc = sqlite3_bind_int(pStmt, 2, class);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int2 failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int2 failed error: %d", rc);
     return 0;
   }
   rc = sqlite3_bind_int(pStmt, 3, driving_points);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int3 failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int3 failed error: %d", rc);
     return 0;
   }
   rc = sqlite3_bind_int(pStmt, 4, *(int *)&data[4]);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int4 failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int4 failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 5, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     return 0;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
+    sql_error(db, "Update failed");
     sqlite3_finalize(pStmt);
     return 0;
   }
@@ -748,23 +757,23 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     *size = 0;
     return 0;
   }
 
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind text failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind text failed error: %d", rc);
     *size = 0;
     return 0;
   }
 
   rc = sqlite3_bind_int(pStmt, 2, carnum);
   if (rc != SQLITE_OK) {
+    sql_error(db, "Bind int failed");
     sqlite3_finalize(pStmt);
-    gs_error("Bind int failed error: %d", rc);
     *size = 0;
     return 0;
   }
@@ -801,12 +810,12 @@ int update_player_car(sqlite3 *db, const char* username, int carnum, const uint8
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
-	return ret;
+    sql_error(db, "Prepare SQL error");
+    return ret;
   }
   rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int failed error: %d", rc);
+    sql_error(db, "Bind int failed");
     goto exit;
   }
   rc = sqlite3_step(pStmt);
@@ -823,31 +832,31 @@ int update_player_car(sqlite3 *db, const char* username, int carnum, const uint8
   zSql = "UPDATE PLAYER_CAR SET CARDATA = ? WHERE PLAYER_ID = ? AND CAR_NUM = ?";
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
+    sql_error(db, "Prepare SQL error");
     return ret;
   }
 
   rc = sqlite3_bind_blob(pStmt, 1, data, size, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind blob failed error: %d", rc);
+    sql_error(db, "Bind blob failed");
     goto exit;
   }
 
   rc = sqlite3_bind_int(pStmt, 2, playerId);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
+    sql_error(db, "Bind text failed");
     goto exit;
   }
 
   rc = sqlite3_bind_int(pStmt, 3, carnum);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int failed error: %d", rc);
+    sql_error(db, "Bind int failed");
     goto exit;
   }
 
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
+    sql_error(db, "Update failed");
     goto exit;
   }
   ret = 1;
@@ -864,12 +873,12 @@ int load_price_list(sqlite3 *db, int type, uint32_t *prices, int size)
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-    gs_error("Prepare SQL error: %d", rc);
-	return ret;
+    sql_error(db, "Prepare SQL error");
+    return ret;
   }
   rc = sqlite3_bind_int(pStmt, 1, type);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int failed error: %d", rc);
+    sql_error(db, "Bind int failed");
     goto exit;
   }
   while ((rc = sqlite3_step(pStmt)) == SQLITE_ROW) {
@@ -881,7 +890,7 @@ int load_price_list(sqlite3 *db, int type, uint32_t *prices, int size)
     prices[id] = (uint32_t)sqlite3_column_int(pStmt, 1);
   }
   if (rc != SQLITE_DONE) {
-    gs_error("SELECT failed: %d", rc);
+    sql_error(db, "SELECT failed");
     goto exit;
   }
   ret = 1;
@@ -898,20 +907,20 @@ int load_game_defines(sqlite3 *db, int *values, int size)
   sqlite3_stmt *pStmt;
   int rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   if (rc != SQLITE_OK ) {
-	gs_error("Prepare SQL error: %d", rc);
-	return ret;
+      sql_error(db, "Prepare SQL error");
+      return ret;
   }
   while ((rc = sqlite3_step(pStmt)) == SQLITE_ROW) {
-	int id = sqlite3_column_int(pStmt, 0);
-	if (id >= size) {
+      int id = sqlite3_column_int(pStmt, 0);
+      if (id >= size) {
 	  gs_error("load_game_defines: list too small");
 	  goto exit;
-	}
-	values[id] = sqlite3_column_int(pStmt, 1);
+      }
+      values[id] = sqlite3_column_int(pStmt, 1);
   }
   if (rc != SQLITE_DONE) {
-    gs_error("SELECT failed: %d", rc);
-    goto exit;
+      sql_error(db, "SELECT failed");
+      goto exit;
   }
   ret = 1;
 
@@ -926,11 +935,11 @@ int load_initial_cash(sqlite3 *db)
   int ret = 10000;
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
-	gs_error("Prepare SQL error");
-	return ret;
+      sql_error(db, "Prepare SQL error");
+      return ret;
   }
   if (sqlite3_step(pStmt) == SQLITE_ROW)
-	ret = sqlite3_column_int(pStmt, 0);
+    ret = sqlite3_column_int(pStmt, 0);
 
   sqlite3_finalize(pStmt);
   return ret;
@@ -942,13 +951,13 @@ int load_motd(sqlite3 *db, char *text, int size)
   memset(text, 0, (size_t)size);
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
-	gs_error("Prepare SQL error");
-	return 0;
+      sql_error(db, "Prepare SQL error");
+      return 0;
   }
   int ret = 0;
   if (sqlite3_step(pStmt) == SQLITE_ROW) {
-	ret = 1;
-	strncpy(text, (char *)sqlite3_column_text(pStmt, 0), (size_t)(size - 1));
+      ret = 1;
+      strncpy(text, (char *)sqlite3_column_text(pStmt, 0), (size_t)(size - 1));
   }
   sqlite3_finalize(pStmt);
   return ret;
@@ -959,29 +968,29 @@ int update_std_race(sqlite3 *db, char *username, int races, int wins)
   const char *zSql = "UPDATE PLAYER_DATA SET STD_RACES = ?, STD_WINS = ? WHERE USERNAME = trim(?)";
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
-      gs_error("Prepare SQL error");
+      sql_error(db, "Prepare SQL error");
       return 0;
   }
   int ret = 0;
   int rc = sqlite3_bind_int(pStmt, 1, races);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, wins);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   rc = sqlite3_bind_text(pStmt, 3, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind text failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Update failed");
+      goto exit;
   }
   ret = 1;
   gs_info("Player %s: %d standard races, %d victories", username, races, wins);
@@ -1007,33 +1016,33 @@ int update_trial_race(sqlite3 *db, char *username, int races, int trials, int wi
   int ret = 0;
   int rc = sqlite3_bind_int(pStmt, 1, races);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, wins);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 3, trials);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int3 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int3 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 4, cash_won);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int4 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int4 failed");
+      goto exit;
   }
   rc = sqlite3_bind_text(pStmt, 5, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind text failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Update failed");
+      goto exit;
   }
   ret = 1;
   gs_info("Player %s: %d trial races, %d/%d wins, $%d cash", username, races, wins, trials, cash_won);
@@ -1048,29 +1057,29 @@ int update_vendetta_race(sqlite3 *db, char *username, int races, int wins)
   const char *zSql = "UPDATE PLAYER_DATA SET VENDETTA_COUNT = ?, VENDETTA_WINS = ? WHERE USERNAME = trim(?)";
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0) != SQLITE_OK) {
-      gs_error("Prepare SQL error");
+      sql_error(db, "Prepare SQL error");
       return 0;
   }
   int ret = 0;
   int rc = sqlite3_bind_int(pStmt, 1, races);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, wins);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   rc = sqlite3_bind_text(pStmt, 3, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind text failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc != SQLITE_DONE) {
-    gs_error("Update failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Update failed");
+      goto exit;
   }
   ret = 1;
   gs_info("Player %s: %d vendetta races, %d wins", username, races, wins);
@@ -1088,32 +1097,30 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
     race_time = -1;
   if (max_speed == 0)
     max_speed = -1;
-  if (sqlite3_exec(db, "BEGIN TRANSACTION", NULL, NULL, NULL) != SQLITE_OK) {
-      gs_error("BEGIN TRAN failed");
-      return -1;
-  }
+  if (lap_time == -1 && race_time == -1 && max_speed == -1)
+    return 0;
   int ret = -1;
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db,
       "SELECT LAP_TIME, RACE_TIME, MAX_SPEED FROM TRACK_RECORD "
       "WHERE USERNAME = trim(?) AND TRACK = ? AND RACE_MODE = ?", -1, &pStmt, 0) != SQLITE_OK) {
-    gs_error("Prepare SQL error");
-    return -1;
+      sql_error(db, "Prepare SQL error");
+      return -1;
   }
   int rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind text failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, track);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 3, mode);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc == SQLITE_DONE)
@@ -1126,38 +1133,38 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
     }
     rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
     if (rc != SQLITE_OK) {
-      gs_error("Bind text failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind text failed");
+	goto exit;
     }
     rc = sqlite3_bind_int(pStmt, 2, track);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int1 failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind int1 failed");
+	goto exit;
     }
     rc = sqlite3_bind_int(pStmt, 3, mode);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int2 failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind int2 failed");
+	goto exit;
     }
     rc = sqlite3_bind_int(pStmt, 4, lap_time);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int3 failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind int3 failed");
+	goto exit;
     }
     rc = sqlite3_bind_int(pStmt, 5, race_time);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int4 failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind int4 failed");
+	goto exit;
     }
     rc = sqlite3_bind_int(pStmt, 6, max_speed);
     if (rc != SQLITE_OK) {
-      gs_error("Bind int5 failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind int5 failed");
+	goto exit;
     }
     rc = sqlite3_step(pStmt);
     if (rc != SQLITE_DONE) {
-      gs_error("INSERT failed error: %d", rc);
-      goto exit;
+	sql_error(db, "INSERT failed");
+	goto exit;
     }
     ret = 0;
   }
@@ -1183,38 +1190,38 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
       }
       rc = sqlite3_bind_int(pStmt, 1, (records & 1) ? lap_time : best_laptime);
       if (rc != SQLITE_OK) {
-        gs_error("Bind int1 failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind int1 failed");
+	  goto exit;
       }
       rc = sqlite3_bind_int(pStmt, 2, (records & 2) ? race_time : best_racetime);
       if (rc != SQLITE_OK) {
-        gs_error("Bind int2 failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind int2 failed");
+	  goto exit;
       }
       rc = sqlite3_bind_int(pStmt, 3, (records & 4) ? max_speed : best_speed);
       if (rc != SQLITE_OK) {
-        gs_error("Bind int3 failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind int3 failed");
+	  goto exit;
       }
       rc = sqlite3_bind_text(pStmt, 4, username, (int)strlen(username), SQLITE_STATIC);
       if (rc != SQLITE_OK) {
-        gs_error("Bind text failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind text failed");
+	  goto exit;
       }
       rc = sqlite3_bind_int(pStmt, 5, track);
       if (rc != SQLITE_OK) {
-        gs_error("Bind int4 failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind int4 failed");
+	  goto exit;
       }
       rc = sqlite3_bind_int(pStmt, 6, mode);
       if (rc != SQLITE_OK) {
-        gs_error("Bind int5 failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind int5 failed");
+	  goto exit;
       }
       rc = sqlite3_step(pStmt);
       if (rc != SQLITE_DONE) {
-        gs_error("UPDATE failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "UPDATE failed");
+	  goto exit;
       }
       if (best_laptime == -1)
 	records &= ~1;
@@ -1242,16 +1249,6 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
 
 exit:
   sqlite3_finalize(pStmt);
-  if (ret >= 0) {
-    if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
-      gs_error("COMMIT failed");
-      ret =  -1;
-    }
-  }
-  else {
-    if (sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL) != SQLITE_OK)
-      gs_error("ROLLBACK failed");
-  }
 
   return ret;
 }
@@ -1263,19 +1260,19 @@ static int load_world_record(sqlite3 *db, int track, int mode, const char *colum
       "WHERE TRACK = ? AND RACE_MODE = ? AND %s != -1", minmax, column, column);
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-    gs_error("Prepare SQL error");
-    return -1;
+      sql_error(db, "Prepare SQL error");
+      return -1;
   }
   int ret = -1;
   int rc = sqlite3_bind_int(pStmt, 1, track);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, mode);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc == SQLITE_ROW && sqlite3_column_type(pStmt, 0) == SQLITE_INTEGER)
@@ -1308,25 +1305,25 @@ int load_top3_record(sqlite3 *db, int track, int mode, int class, char *buf, con
 	column, column, column, order);
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-    gs_error("Prepare SQL error");
-    return 0;
+      sql_error(db, "Prepare SQL error");
+      return 0;
   }
   int ret = 0;
   int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":track"), track);
   if (rc != SQLITE_OK) {
-    gs_error("Bind track failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind track failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":mode"), mode);
   if (rc != SQLITE_OK) {
-    gs_error("Bind mode failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind mode failed");
+      goto exit;
   }
   if (class != 4) {
     int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
     if (rc != SQLITE_OK) {
-      gs_error("Bind class failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind class failed");
+	goto exit;
     }
   }
   char *p = buf + 1;
@@ -1358,18 +1355,18 @@ int load_sdo_track_record(sqlite3 *db, char *username, int track, int mode, int 
   }
   int rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind text failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind text failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 2, track);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int1 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int1 failed");
+      goto exit;
   }
   rc = sqlite3_bind_int(pStmt, 3, mode);
   if (rc != SQLITE_OK) {
-    gs_error("Bind int2 failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind int2 failed");
+      goto exit;
   }
   int best_lap = -1;
   int best_race = -1;
@@ -1446,14 +1443,14 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
 	  class == 4 ? "" : "AND class = :class");
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-    gs_error("Prepare SQL error");
-    goto exit;
+      sql_error(db, "Prepare SQL error");
+      goto exit;
   }
   if (class != 4) {
     int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
     if (rc != SQLITE_OK) {
-      gs_error("Bind class failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind class failed");
+	goto exit;
     }
   }
   int ranks[31];
@@ -1487,20 +1484,20 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
     sprintf(sql, "SELECT * FROM (SELECT username, %s v, RANK() OVER (ORDER BY %s DESC) rnk FROM player_data WHERE v != 0 %s) WHERE username = trim(:username)", qcol, qcol,
 	    class == 4 ? "" : "AND class = :class");
     if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-      gs_error("Prepare SQL error");
-      goto exit;
+	sql_error(db, "Prepare SQL error");
+	goto exit;
     }
     if (class != 4) {
       int rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
       if (rc != SQLITE_OK) {
-        gs_error("Bind class failed error: %d", rc);
-        goto exit;
+	  sql_error(db, "Bind class failed");
+	  goto exit;
       }
     }
     int rc = sqlite3_bind_text(pStmt, sqlite3_bind_parameter_index(pStmt, ":username"), username, (int)strlen(username), SQLITE_STATIC);
     if (rc != SQLITE_OK) {
-      gs_error("Bind username failed error: %d", rc);
-      goto exit;
+	sql_error(db, "Bind username failed");
+	goto exit;
     }
     if (sqlite3_step(pStmt) != SQLITE_ROW) {
       sqlite3_finalize(pStmt);
@@ -1516,20 +1513,20 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
       sprintf(sql, "SELECT * FROM (SELECT username, %s v, RANK() OVER (ORDER BY %s DESC) rnk FROM player_data WHERE v != 0 %s) WHERE rnk < :rank ORDER BY rnk DESC LIMIT 5", qcol, qcol,
 	      class == 4 ? "" : "AND class = :class");
       if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-	gs_error("Prepare SQL error");
-	goto exit;
+	  sql_error(db, "Prepare SQL error");
+	  goto exit;
       }
       if (class != 4) {
         rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
         if (rc != SQLITE_OK) {
-          gs_error("Bind class failed error: %d", rc);
-          goto exit;
+            sql_error(db, "Bind class failed");
+            goto exit;
         }
       }
       rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":rank"), user_rank);
       if (rc != SQLITE_OK) {
-	gs_error("Bind user_rank failed error: %d", rc);
-	goto exit;
+	  sql_error(db, "Bind user_rank failed");
+	  goto exit;
       }
       zone_count = p;
       *zone_count = 0;
@@ -1558,25 +1555,25 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
 	  "WHERE rnk >= :rank and username != trim(:username) ORDER BY rnk LIMIT 5", qcol, qcol,
 	  class == 4 ? "" : "AND class = :class");
       if (sqlite3_prepare_v2(db, sql, -1, &pStmt, 0) != SQLITE_OK) {
-	gs_error("Prepare SQL error");
-	goto exit;
+	  sql_error(db, "Prepare SQL error");
+	  goto exit;
       }
       if (class != 4) {
         rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":class"), class);
         if (rc != SQLITE_OK) {
-          gs_error("Bind class failed error: %d", rc);
-          goto exit;
+            sql_error(db, "Bind class failed");
+            goto exit;
         }
       }
       rc = sqlite3_bind_int(pStmt, sqlite3_bind_parameter_index(pStmt, ":rank"), user_rank);
       if (rc != SQLITE_OK) {
-	gs_error("Bind user_rank failed error: %d", rc);
-	goto exit;
+	  sql_error(db, "Bind user_rank failed");
+	  goto exit;
       }
       rc = sqlite3_bind_text(pStmt, sqlite3_bind_parameter_index(pStmt, ":username"), username, (int)strlen(username), SQLITE_STATIC);
       if (rc != SQLITE_OK) {
-	gs_error("Bind username failed error: %d", rc);
-	goto exit;
+	  sql_error(db, "Bind username failed");
+	  goto exit;
       }
       zone_count = p;
       *zone_count = 0;
@@ -1609,14 +1606,14 @@ int load_player_scorecard(sqlite3 *db, const char* username, uint32_t *class, ui
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db, "SELECT CLASS, DRIVING_POINTS, CASH "
       "FROM PLAYER_DATA WHERE USERNAME = trim(?)", -1, &pStmt, 0) != SQLITE_OK) {
-    gs_error("Prepare SQL error");
-    return -1;
+      sql_error(db, "Prepare SQL error");
+      return -1;
   }
   int ret = -1;
   int rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
   if (rc != SQLITE_OK) {
-    gs_error("Bind username failed error: %d", rc);
-    goto exit;
+      sql_error(db, "Bind username failed");
+      goto exit;
   }
   rc = sqlite3_step(pStmt);
   if (rc == SQLITE_ROW) {
