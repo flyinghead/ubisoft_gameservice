@@ -44,15 +44,27 @@
 
 typedef struct server_data server_data_t;
 
+#define SEQ_TAB_LEN 150
+
 typedef struct {
   int sock;
   int is_master;
   struct {
     int ready;
-    uint16_t last_time;
     uint32_t client_seq;
+    uint32_t rel_client_seq;
+    uint32_t last_ack_seq;
+    uint32_t last_rel_ack_seq;
+    uint16_t last_time;
+    uint16_t clock_diff;
     time_t last_update;
     struct sockaddr_in addr;
+    struct {
+      uint32_t cseq;
+      uint32_t sseq;
+    } seq_table[SEQ_TAB_LEN];
+    int seq_head;
+    int seq_tail;
   } udp;
   uint32_t trophies;
   uint32_t points;

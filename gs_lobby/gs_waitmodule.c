@@ -339,6 +339,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
       strlcpy(pl->username, tok_array[0], sizeof(pl->username));
       gs_info("User %s is joining the waitmodule", pl->username);
+      print_gs_data(buf, (unsigned)buf_len);
 
       /* Load player record, create if not exists */
       sqlite3 *db = open_gs_db(s->server_db_path);

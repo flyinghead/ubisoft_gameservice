@@ -35,6 +35,9 @@
 #include "gs_sql.h"
 #include "../gs_common/gs_common.h"
 
+#define RUDP_FLAG 0x800000
+#define RUDP_MASK 0x7FFFFF
+
 uint32_t serverSeq = 1;
 server_data_t server_data;
 FILE *udp_dump;
@@ -86,17 +89,57 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
   }
 }
 
-void send_udp_player(player_t *player, char* msg, uint16_t pkt_size)
+static uint32_t find_cli_seq(player_t *player, uint32_t sseq)
 {
-  uint24_to_char(player->udp.client_seq, &msg[3]);
-  player->udp.client_seq &= 0x7fffff;
-  uint16_to_char(player->udp.last_time, &msg[8]);
-  sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
-	     (struct sockaddr*)&player->udp.addr,
-	     (socklen_t)sizeof(struct sockaddr_in));
+  uint32_t cseq = 0;
+  for (int i = player->udp.seq_head; i != player->udp.seq_tail; i = (i + 1) % SEQ_TAB_LEN) {
+      if (player->udp.seq_table[i].sseq > sseq)
+	break;
+      cseq = player->udp.seq_table[i].cseq;
+  }
+  return cseq;
 }
 
-void send_udp_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
+static void add_cli_seq(player_t *player, uint32_t cseq, uint32_t sseq)
+{
+  player->udp.seq_table[player->udp.seq_tail].cseq = cseq;
+  player->udp.seq_table[player->udp.seq_tail].sseq = sseq;
+  player->udp.seq_tail = (player->udp.seq_tail + 1) % SEQ_TAB_LEN;
+  if (player->udp.seq_head == player->udp.seq_tail)
+    player->udp.seq_head = (player->udp.seq_head + 1) % SEQ_TAB_LEN;
+}
+
+void send_udp_player(player_t *player, char* msg, uint16_t pkt_size)
+{
+  uint32_t last_ack_seq = serverSeq;
+  uint32_t last_rel_ack_seq = serverSeq;
+  for (int i = 0; i < player->server->max_players; i++) {
+      player_t *pl = player->server->p_l[i];
+      if (pl == NULL || pl->player_id == player->player_id)
+	continue;
+      if (pl->udp.last_ack_seq < last_ack_seq)
+	last_ack_seq = pl->udp.last_ack_seq;
+      if (pl->udp.last_rel_ack_seq < last_rel_ack_seq)
+	last_rel_ack_seq = pl->udp.last_rel_ack_seq;
+  }
+  last_ack_seq = find_cli_seq(player, last_ack_seq);
+  last_rel_ack_seq = find_cli_seq(player, last_rel_ack_seq);
+  if (last_rel_ack_seq != 0
+      && last_rel_ack_seq >= player->udp.rel_client_seq
+      && last_rel_ack_seq - player->udp.rel_client_seq <= 5)
+    last_ack_seq |= RUDP_FLAG;
+  uint24_to_char(last_ack_seq, &msg[3]);
+
+//  uint16_t pred_cli_time = (uint16_t)(char_to_uint16(&msg[6]) + player->udp.clock_diff);
+//  uint16_to_char(pred_cli_time, &msg[8]);
+  uint16_to_char(player->udp.last_time, &msg[8]); // FIXME this gives better internal ping values (150 instead of 10)
+
+  sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
+	 (struct sockaddr*)&player->udp.addr,
+	 (socklen_t)sizeof(struct sockaddr_in));
+}
+
+void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;
 
   uint32_t reliable = (msg[0] & 0x80) << 16;
@@ -189,23 +232,6 @@ uint16_t create_gameserver_udp_hdr(char* msg, uint8_t msg_id, uint8_t msg_flag, 
 }
 */
 
-uint16_t create_gameserver_udp_hdr(char* msg, uint cliSeq, uint8_t msg_id, uint8_t msg_flag, uint16_t msg_size)
-{
-  /* Server sequence */
-  uint24_to_char(serverSeq, &msg[0]);
-  serverSeq++;
-  /* Last received client sequence */
-  uint24_to_char(cliSeq, &msg[3]);
-  /* Server time */
-  uint16_to_char((uint16_t)get_time_ms(), &msg[6]);
-
-  msg[10] = (char)(msg_size + 4);
-  msg[11] = (char)(0x10 | msg_flag);
-  msg[13] = (char)msg_id;
-
-  return msg_size + 14;
-}
-
 /* Create new player message */
 uint16_t create_event_newplayer(char* msg, uint16_t playerid, char* username) {
   uint16_t pkt_size = 0;
@@ -287,15 +313,7 @@ uint16_t create_event_newmaster(char* msg, uint16_t playerid) {
 int add_gameserver_player(server_data_t *s, player_t *pl) {
   int i;
   uint16_t max_players = s->max_players;
-  memset(pl->username, 0, MAX_UNAME_LEN);
 
-  pl->is_master = 0;
-  pl->udp.ready = 0;
-  pl->udp.client_seq = 0;
-  pl->udp.last_time = 0;
-  pl->udp.last_update = 0;
-  pl->player_id = 0;
-  
   pthread_mutex_lock(&s->mutex);
   for(i=0;i<max_players;i++) {
     if(!(s->p_l[i])) {
@@ -325,18 +343,22 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   pthread_mutex_lock(&s->mutex);
   /* If master left, change to the next in list */
   if(pl->is_master == 1) {
+    s->master_id = 0;
     for(i=0;i<max_players;i++) {
-      if ( s->p_l[i] && s->p_l[i]->player_id != pl->player_id) {
-	s->master_id = s->p_l[i]->player_id;
-	strlcpy(s->master, s->p_l[i]->username, sizeof(s->master));
-	s->p_l[i]->is_master = 1;
-	gs_info("Master left the game, change to 0x%02x: %s", s->master_id, s->master);
+      player_t *new_master = s->p_l[i];
+      if (new_master && new_master->player_id != pl->player_id && new_master->player_id != 0) {
+	s->master_id = new_master->player_id;
+	s->master[0] = '\0';
+	new_master->is_master = 1;
+	gs_info("Master left the game, change to 0x%02x: %s", s->master_id, new_master->username);
 	pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWMASTER, SENDTOSERVER, pkt_size);
 	send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
 	break;
       }
     }
+    if (s->master_id == 0 && s->current_nr_of_players >= 2)
+      gs_info("GAMESERVER%d - Can't find a new master. Aborting", s->game_tcp_port);
   }
 
   /* Find and remove user */
@@ -348,7 +370,7 @@ void remove_gameserver_player(player_t *pl, char* msg) {
     }
   }
   free(pl);
-  if (s->current_nr_of_players == 0) {
+  if (s->current_nr_of_players == 0 || s->master_id == 0) {
     gs_info("GAMESERVER%d - Server is empty...exit", s->game_tcp_port);
 
     if (sqlite3_close(s->db) != SQLITE_OK) {
@@ -462,23 +484,32 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       
       buf[buf_len] = '\0';
 
+      pthread_mutex_lock(&s->mutex);
+      /* enforce username unicity */
+      for (int i = 0; i < s->max_players; i++) {
+	  player_t *player = s->p_l[i];
+	  if (player == NULL || strcmp(player->username, &buf[8]) != 0)
+	    continue;
+	  gs_info("GAMESERVER%d - Kicking duplicate user %s", s->game_tcp_port, player->username);
+	  /* Close the client connection */
+	  shutdown(player->sock, SHUT_RDWR);
+      }
       strlcpy(pl->username, &buf[8], sizeof(pl->username));
       gs_info("GAMESERVER%d - User %s joined the Game Server", s->game_tcp_port, pl->username);
-      pthread_mutex_lock(&s->mutex);
       if ((strcmp(pl->username, s->master)) == 0) {
         pl->is_master = 1;
-        gs_info("GAMESERVER%d - User is Game Master", s->game_tcp_port);
         pl->player_id = 1;
         s->master_id = 1;
-      } else {
-        gs_info("GAMESERVER%d - User is not Game Master", s->game_tcp_port);
+      }
+      else {
         pl->player_id = 1;
         for (int i = 0; i < s->max_players; i++)
   	      if (s->p_l[i] && s->p_l[i]->player_id >= pl->player_id)
   	        pl->player_id = s->p_l[i]->player_id;
   	    pl->player_id += 1;
       }
-      gs_info("GAMESERVER%d - Player got id: 0x%02x", s->game_tcp_port, pl->player_id);
+      gs_info("GAMESERVER%d - Player %s got id: %d%s", s->game_tcp_port, pl->username,
+	      pl->player_id, pl->is_master ? " (Master)" : "");
 
       /* New user added */
       s->current_nr_of_players = (uint8_t)(s->current_nr_of_players + 1);
@@ -797,10 +828,10 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 	data[46] = 1000;
 	data[47] = 2000;
 	data[48] = 4000;
-	data[49] = 5;		// radar busted bonus per mph (per class)
-	data[50] = 10;
-	data[51] = 20;
-	data[52] = 40;
+	data[49] = 10;		// radar busted bonus per mph (per class)
+	data[50] = 25;
+	data[51] = 50;
+	data[52] = 100;
 	load_game_defines(s->db, data, sizeof(data) / sizeof(data[0]));
 	// montreal1 (forward)
 	size_t idx = 53 + 10 * 4 * 3 * 2;
@@ -1205,6 +1236,28 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
   return pkt_size;
 }
 
+static void create_gameserver_udp_header(char* msg, uint cliSeq)
+{
+  /* Server sequence */
+  uint24_to_char(serverSeq, &msg[0]);
+  serverSeq++;
+  /* Last received client sequence */
+  uint24_to_char(cliSeq, &msg[3]);
+  /* Server time */
+  uint16_to_char((uint16_t)get_time_ms(), &msg[6]);
+  /* Predicted client time */
+  uint16_to_char(0, &msg[8]);
+}
+
+static uint16_t create_gameserver_udp_segment(char* msg, uint8_t msg_id, uint8_t msg_flag, uint16_t msg_size)
+{
+  msg[0] = (char)(msg_size + 4);
+  msg[1] = (char)(0x10 | msg_flag);
+  msg[3] = (char)msg_id;
+
+  return msg_size + 4;
+}
+
 /*
  * Function: udp_msg_handler
  * --------------------
@@ -1220,9 +1273,6 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
  *           
  */
 int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in *client) {
-  uint16_t recv_size = 0, pkt_size = 0;
-  uint8_t send_flag = 0;
-  uint8_t msg_id = 0;
   char msg[MAX_PKT_SIZE];
   
   if (buf_len < 10) {
@@ -1246,15 +1296,33 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 
   /* Parse header */
   time_t now = get_time_ms();
-  pl->udp.client_seq = (pl->udp.client_seq & 0x800000) | char_to_uint24(&buf[0]);
+  pl->udp.client_seq = char_to_uint24(&buf[0]);
+  if (pl->udp.client_seq & RUDP_FLAG) {
+      pl->udp.client_seq &= RUDP_MASK;
+      pl->udp.rel_client_seq = pl->udp.client_seq;
+  }
+  add_cli_seq(pl, pl->udp.client_seq, serverSeq);
+  pl->udp.last_ack_seq = char_to_uint24(&buf[3]);
+  if (pl->udp.last_ack_seq & RUDP_FLAG) {
+      pl->udp.last_ack_seq &= RUDP_MASK;
+      pl->udp.last_rel_ack_seq = pl->udp.last_ack_seq;
+  }
   pl->udp.last_time = char_to_uint16(&buf[6]);
+  uint16_t pred_clock = char_to_uint16(&buf[8]);
+  if (pred_clock != 0)
+    /* TODO moving average? */
+    pl->udp.clock_diff = pl->udp.last_time - pred_clock;
   pl->udp.last_update = now;
+
+  /* Respond to packets to the server */
+  int send_to_players = 0;
+  uint16_t pkt_size = 10;
   char *p = &buf[10];
   while (p - buf < buf_len)
   {
     int size = *p & 0xff;
-    msg_id = (uint8_t)(p[3] & 0xff);
-    send_flag = p[1] & 0xf;
+    uint8_t msg_id = (uint8_t)(p[3] & 0xff);
+    int send_flag = p[1] & 0xf;
     p += size;
     if (p - buf > buf_len)
       break;
@@ -1263,23 +1331,19 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
     {
 	switch(msg_id) {
 	  case EVENT_UDPCONNECT:
-	    if (new_connection) /* s->max_players == s->current_nr_of_players) */ {
+	    if (new_connection) {
 		gs_info("Got UDPCONNECT");
 		pl->udp.ready = 1;
-		pkt_size = create_gameserver_udp_hdr(msg, pl->udp.client_seq, (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
-		pl->udp.client_seq &= 0x7fffff;
-		uint16_to_char(pl->udp.last_time, &msg[8]);
-		sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-		       (struct sockaddr*)&pl->udp.addr,
-		       (socklen_t)sizeof(struct sockaddr_in));
+		pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
 
-		pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
-		pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWMASTER, SENDTOALLPLAYERS, pkt_size);
-		write(pl->sock, msg, pkt_size);
+		char tmsg[MAX_PKT_SIZE];
+		uint16_t tpkt_size = create_event_newmaster(&tmsg[8], (uint16_t)s->master_id);
+		tpkt_size = create_gameserver_hdr(tmsg, (uint8_t)EVENT_NEWMASTER, SENDTOALLPLAYERS, tpkt_size);
+		write(pl->sock, tmsg, tpkt_size);
 
-		pkt_size = create_event_playerinfos(&msg[8], pl->player_id, (uint32_t)pl->points, (uint32_t)pl->trophies);
-		pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_PLAYERINFOS, SENDTOALLPLAYERS, pkt_size);
-		write(pl->sock, msg, pkt_size);
+		tpkt_size = create_event_playerinfos(&tmsg[8], pl->player_id, (uint32_t)pl->points, (uint32_t)pl->trophies);
+		tpkt_size = create_gameserver_hdr(tmsg, (uint8_t)EVENT_PLAYERINFOS, SENDTOALLPLAYERS, tpkt_size);
+		write(pl->sock, tmsg, tpkt_size);
 	    }
 	    break;
 
@@ -1287,13 +1351,8 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    {
 	      uint32_t rate = char_to_uint32(p - 4);
 	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
-	      uint32_to_char(rate, &msg[14]);
-	      pkt_size = create_gameserver_udp_hdr(msg, pl->udp.client_seq, (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
-	      pl->udp.client_seq &= 0x7fffff;
-	      uint16_to_char(pl->udp.last_time, &msg[8]);
-	      sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
-		     (struct sockaddr*)&pl->udp.addr,
-		     (socklen_t)sizeof(struct sockaddr_in));
+	      uint32_to_char(rate, &msg[pkt_size + 4]);
+	      pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
 	    }
 	    break;
 
@@ -1305,13 +1364,25 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    print_gs_data(buf, (long unsigned int)buf_len);
 	    break;
 	}
-    } else if (send_flag == SENDTOPLAYER) {
-	if (recv_size >= 0x12)
-	    send_udp_functions(send_flag, buf, (uint16_t)buf_len, s, ntohs(char_to_uint16(&buf[0x10])));
     } else {
-	send_udp_functions(send_flag, buf, (uint16_t)(buf_len), s, pl->player_id);
+	send_to_players = send_flag;
     }
   }
+  if (pkt_size > 10) {
+      uint32_t cli_seq = char_to_uint24(&buf[0]);
+      if ((cli_seq & RUDP_FLAG) && send_to_players)
+	/* will ack when players ack */
+	cli_seq &= RUDP_MASK;
+      create_gameserver_udp_header(msg, cli_seq);
+//      uint16_to_char((uint16_t)(now + pl->udp.clock_diff), &msg[8]);
+      uint16_to_char(pl->udp.last_time, &msg[8]);
+      sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
+	     (struct sockaddr*)&pl->udp.addr,
+	     (socklen_t)sizeof(struct sockaddr_in));
+  }
+  /* Broadcast packets to players */
+  if (send_to_players)
+      send_udp_functions(send_to_players, buf, (uint16_t)buf_len, s, pl->player_id);
   /* Handle timeouts */
   for (int i = 0; i < (int)s->max_players; i++)
   {
@@ -1651,7 +1722,7 @@ int main (int argc, char *argv[]) {
     
   while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) >= 0) {
     //Store player data
-    player_t *pl = (player_t *)malloc(sizeof(player_t));
+    player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = &server_data;
