@@ -901,8 +901,20 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
       gs_error("Got %d strings from LOGINARENA packet needs 1", nr_s_parsed);
       return 0;
     }
-    
-    strlcpy(pl->username, tok_array[0], strlen(tok_array[0])+1);
+    {
+      pthread_mutex_lock(&s->mutex);
+      for(i = 0; i < s->max_players; i++) {
+	player_t *player = s->server_p_l[i];
+	if (player == NULL || player == pl)
+	  continue;
+	if (strcmp(player->username, tok_array[0]) == 0) {
+	  shutdown(player->sock, SHUT_RDWR);
+	  break;
+	}
+      }
+      strlcpy(pl->username, tok_array[0], sizeof(pl->username));
+      pthread_mutex_unlock(&s->mutex);
+    }
     gs_info("lobby: User %s is joining the %s server", pl->username, s->game);
     
     pkt_size = create_loginarena(&msg[6], s->arena_id);

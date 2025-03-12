@@ -40,14 +40,17 @@
 #define USER_ALREADY_LOGGED_IN 3
 #define LOGIN_FAILED 4
 
-player_t* find_user(server_data_t *s, const char* username) {
-  int i;
-  for (i = 0; i < s->max_players; i++) {
-    if (s->waitmodule_p_l[i]) {
-      if (strncmp(s->waitmodule_p_l[i]->username, username, strlen(username)) == 0) {
+player_t* find_user(server_data_t *s, const char* username, int prefix) {
+  for (int i = 0; i < s->max_players; i++) {
+      if (s->waitmodule_p_l[i] == NULL)
+	continue;
+      int cmp;
+      if (prefix)
+	cmp = strncmp(s->waitmodule_p_l[i]->username, username, strlen(username));
+      else
+	cmp = strcmp(s->waitmodule_p_l[i]->username, username);
+      if (cmp == 0)
 	return s->waitmodule_p_l[i];
-      }
-    }
   }
   return NULL;
 }
@@ -327,11 +330,16 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 
     if (tok_array[0] == NULL)
       return 0;
-    
-    strlcpy(pl->username, tok_array[0], strlen(tok_array[0])+1);
-    gs_info("User %s is joining the waitmodule", pl->username);
 
     {
+      /* Eject existing user with the same name if any */
+      player_t *other = find_user(s, tok_array[0], 0);
+      if (other != NULL)
+	shutdown(other->sock, SHUT_RDWR);
+
+      strlcpy(pl->username, tok_array[0], sizeof(pl->username));
+      gs_info("User %s is joining the waitmodule", pl->username);
+
       /* Load player record, create if not exists */
       sqlite3 *db = open_gs_db(s->server_db_path);
       if (db == NULL) {
@@ -405,7 +413,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     } else {
       /* Fix for playerinfo lookup from POD chat */
       pthread_mutex_lock(&s->wm_mutex);
-      player_t *pl_lookup = find_user(s, username);
+      player_t *pl_lookup = find_user(s, username, 1);
       if (pl_lookup != NULL) {
 	if( (inet_ntop(AF_INET, &(pl_lookup->addr.sin_addr), ip, INET_ADDRSTRLEN)) == NULL ) {
 	  pthread_mutex_unlock(&s->wm_mutex);
@@ -474,7 +482,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     {
       char scorecard[64];
 
-      player_t *pl_lookup = find_user(s, username);
+      player_t *pl_lookup = find_user(s, username, 0);
       if (pl_lookup != NULL) {
 	  if (s->server_type == SDO_SERVER) {
 	    sqlite3 *db = open_gs_db(s->server_db_path);
