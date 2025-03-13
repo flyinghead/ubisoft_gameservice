@@ -264,6 +264,11 @@ void remove_waitmodule_player(player_t *pl) {
   pthread_mutex_unlock(&s->wm_mutex);
 }
 
+const char *get_player_ip(player_t *player) {
+  static char str[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &player->addr.sin_addr, str, sizeof(str));
+  return str;
+}
 
 /*
  * Function: server_msg_handler
@@ -280,7 +285,7 @@ void remove_waitmodule_player(player_t *pl) {
  *  returns: pkt size
  *
  */
-uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
+ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
   server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t recv_flag = 0;
@@ -293,21 +298,20 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
   buf[buf_len] = '\0';
   //Parse header
   if (buf_len < 6) {
-    gs_info("[waitmodule] Length of packet is less then 6 bytes...[SKIP]");
-    return 0;
+    gs_info("[%s] waitmod: Protocol error: small packet", get_player_ip(pl));
+    return -1;
   }
 
   recv_flag = (uint8_t)buf[4];
   recv_size = char_to_uint16(&buf[1]);
   if (recv_size > buf_len) {
-    gs_info("[waitmodule] Packet size %d is greater then buffer size %d", recv_size, buf_len);
-    print_gs_data(buf, (long unsigned int)buf_len);
-    return 0;
+    gs_info("[%s] waitmod: Protocol error: packet size %d > recv size %d", get_player_ip(pl), recv_size, buf_len);
+    return -1;
   }
 
   while (pos < recv_size) {
     if (nr_parsed == 256) {
-      return 0;
+      return -1;
     }
     switch (buf[pos]) {
     case 's':
@@ -328,7 +332,7 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       return 0;
     }
 
-    if (tok_array[0] == NULL)
+    if (tok_array[0][0] == '\0')
       return 0;
 
     {
@@ -514,8 +518,8 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
     gs_info("waitmod: %s disconnected from session", pl->username);
     break;
   default:
-    gs_info("waitmod: Flag not supported %02x", recv_flag);
-    return 0;
+    gs_info("[%s] waitmod: Protocol error: unknown message %02x", get_player_ip(pl), recv_flag);
+    return -1;
   }
  
   return pkt_size;
@@ -535,11 +539,8 @@ uint16_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
 void *gs_waitmodule_client_handler(void *data) {
   player_t *pl = (player_t *)data;
   int sock = pl->sock; 
-  ssize_t read_size=0;
-  size_t write_size=0;
+  ssize_t read_size;
   char c_msg[MAX_PKT_SIZE], s_msg[MAX_PKT_SIZE];
-  memset(c_msg, 0, sizeof(c_msg));
-  memset(s_msg, 0, sizeof(s_msg));
 
   struct timeval tv;
   tv.tv_sec = 1800;       /* Timeout in seconds */
@@ -548,30 +549,23 @@ void *gs_waitmodule_client_handler(void *data) {
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv,sizeof(struct timeval));
   
   //Receive a message from client
-  while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
-    gs_decode_data((uint8_t*)(c_msg+6), (size_t)(read_size-6));
-    write_size = waitmodule_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
-    if (write_size > 0) {
-      send_gs_msg(sock, s_msg, (uint16_t)write_size);
+  while ((read_size = recv(sock, c_msg, sizeof(c_msg) - 1, 0)) > 0) {
+    ssize_t write_size = -1;
+    if (read_size >= 6) {
+	gs_decode_data((uint8_t *)(c_msg + 6), (size_t)(read_size - 6));
+	memset(s_msg, 0, sizeof(s_msg));
+	write_size = waitmodule_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
+	if (write_size > 0)
+	  send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
-    if (write_size < 0) {
-      gs_error("Client with socket %d is not following protocol - Disconnecting", sock);
-      close(sock);
-      remove_waitmodule_player(pl);
-      free(pl);
-      return 0;
-    }
-    memset(s_msg, 0, sizeof(s_msg));
-    memset(c_msg, 0, sizeof(c_msg));
-    fflush(stdout);
+    if (write_size < 0)
+      break;
   }
-  
   close(sock);
-  fflush(stdout);
-
   remove_waitmodule_player(pl);
   free(pl);
-  return 0;
+
+  return NULL;
 }
 
 /*

@@ -50,13 +50,13 @@ void gs_error(const char* format, ... ) {
   snprintf(td_str, sizeof(td_str), "[%04d/%02d/%02d %02d:%02d:%02d]", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
   fprintf(stderr,"%s",td_str);
   
-  s_str = "[ERROR]: ";
+  s_str = "[ERROR] ";
   
-  fprintf(stdout,"%s",s_str);
+  fprintf(stderr,"%s",s_str);
   va_start(args,format);
-  vfprintf(stdout,format,args);
+  vfprintf(stderr,format,args);
   va_end(args);
-  fprintf(stdout,"\n");
+  fprintf(stderr,"\n");
 }
 
 void gs_info(const char* format, ... ) {
@@ -70,7 +70,7 @@ void gs_info(const char* format, ... ) {
   snprintf(td_str, sizeof(td_str), "[%04d/%02d/%02d %02d:%02d:%02d]", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
   fprintf(stdout,"%s",td_str);
 
-  s_str = "[INFO]: ";
+  s_str = "[INFO] ";
 
   fprintf(stdout,"%s",s_str);
   va_start(args,format);

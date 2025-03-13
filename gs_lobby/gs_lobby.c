@@ -237,7 +237,10 @@ static int icmp_ping(const struct sockaddr_in *addr)
 {
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
   if (sock == -1) {
-      gs_error("Can't create ICMP socket");
+      if (errno == EPERM || errno == EACCES)
+	gs_error("Can't create ICMP socket: permission denied. Set net.ipv4.ping_group_range correctly.");
+      else
+	gs_error("Can't create ICMP socket: errno %d", errno);
       return -1;
   }
   int flags = fcntl(sock, F_GETFL, IPPROTO_ICMP);
@@ -625,28 +628,29 @@ void remove_server_session(server_data_t *s, session_t *sess) {
   int i;
   
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<max_sessions;i++) {
-    if(s->s_l[i]) {
-      if (s->s_l[i]->session_id == sess->session_id) {
-	gs_info("Removed session %s", sess->session_name);
-	if (sess->gameserver_pipe != -1) {
-	  close(sess->gameserver_pipe);
-	  /* Avoid deadlock with pipe thread */
-	  int lock_count = 0;
-	  while (pthread_mutex_unlock(&s->mutex) == 0)
-	    lock_count++;
-	  pthread_join(sess->pipe_thread, NULL);
-	  while (lock_count-- > 0)
-	    pthread_mutex_lock(&s->mutex);
-	}
-	free(s->s_l[i]->p_l);
-	free(s->s_l[i]);
-	s->s_l[i] = NULL;
-	break;
-      }
+  for (i = 0; i < max_sessions; i++) {
+    if (s->s_l[i] == sess) {
+      s->s_l[i] = NULL;
+      break;
     }
   }
   pthread_mutex_unlock(&s->mutex);
+  if (i == max_sessions)
+    return;
+
+  gs_info("Removed session %s", sess->session_name);
+  if (sess->gameserver_pipe != -1) {
+      close(sess->gameserver_pipe);
+      /* Avoid deadlock with pipe thread */
+      int lock_count = 0;
+      while (pthread_mutex_unlock(&s->mutex) == 0)
+	lock_count++;
+      pthread_join(sess->pipe_thread, NULL);
+      while (lock_count-- > 0)
+	pthread_mutex_lock(&s->mutex);
+  }
+  free(sess->p_l);
+  free(sess);
 }
 
 /* Caller *must* lock the server mutex */
@@ -833,7 +837,7 @@ int add_server_session(server_data_t *s,
  *  returns: pkt size
  *
  */
-uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
+ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
   server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t recv_flag = 0;
@@ -1280,8 +1284,7 @@ uint16_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int bu
 void *gs_server_client_handler(void *data) {
   player_t *pl = (player_t *)data;
   int sock = pl->sock; 
-  ssize_t read_size=0;
-  size_t write_size=0;
+  ssize_t read_size;
   char c_msg[MAX_PKT_SIZE], s_msg[MAX_PKT_SIZE];
   memset(c_msg, 0, sizeof(c_msg));
   memset(s_msg, 0, sizeof(s_msg));
@@ -1293,28 +1296,24 @@ void *gs_server_client_handler(void *data) {
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv,sizeof(struct timeval));
   
   //Receive a message from client
-  while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
-    gs_decode_data((uint8_t*)(c_msg+6), (size_t)(read_size-6));
-    write_size = server_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
-    if (write_size > 0) {
-      send_gs_msg(sock, s_msg, (uint16_t)write_size);
+  while ((read_size = recv(sock, c_msg, sizeof(c_msg) - 1, 0)) > 0) {
+    ssize_t write_size = -1;
+    if (read_size >= 6) {
+	gs_decode_data((uint8_t *)(c_msg + 6), (size_t)(read_size - 6));
+	memset(s_msg, 0, sizeof(s_msg));
+	write_size = server_msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
+	if (write_size > 0)
+	  send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
     if (write_size < 0) {
       gs_error("Client with socket %d is not following protocol - Disconnecting", sock);
-      remove_server_player(pl);
-      free(pl);
-      return 0;
+      break;
     }
-    memset(s_msg, 0, sizeof(s_msg));
-    memset(c_msg, 0, sizeof(c_msg));
-    fflush(stdout);
   }
-  
-  fflush(stdout);
-
   remove_server_player(pl);
   free(pl);
-  return 0;
+
+  return NULL;
 }
 
 void *gs_server_handler(void* data) {
