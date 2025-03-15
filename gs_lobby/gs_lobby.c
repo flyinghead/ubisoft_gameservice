@@ -36,6 +36,7 @@
 #include "gs_waitmodule.h"
 #include "../gs_common/gs_common.h"
 #include "../gs_common/gs_msg.h"
+#include "discord.h"
 
 #define GS_PORT_OFFSET 30000
 #define SESSION_LOCKED 0x08
@@ -1016,6 +1017,17 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     
     /* Joining the lobby/arena send all players and sessions */
     if (groupid == s->basicgroup_id) {
+#ifdef DISCORD
+      const char **player_list = (const char **)calloc(s->max_players, sizeof(char *));
+      int nplayers = 0;
+      for (i = 0; i < s->max_players; i++) {
+	player_t *player = s->server_p_l[i];
+	if (player && player->player_id != pl->player_id)
+	  player_list[nplayers++] = player->username;
+      }
+      discord_user_joined(pl->username, player_list, nplayers);
+      free(player_list);
+#endif
       for (i = 0; i < s->max_sessions; i++) {
 	if (s->s_l[i]) {
 	  pkt_size = create_sessionnew(&msg[6], s->s_l[i]);
@@ -1167,7 +1179,11 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       pkt_size = create_startgame(&msg[6], groupid, s->server_ip, sess->session_gameport);
       pkt_size = create_gs_hdr(msg, STARTGAME, 0x24, pkt_size);
       send_msg_to_session(sess, msg, pkt_size);
-      
+
+#ifdef DISCORD
+      if (s->server_type != SDO_SERVER || strcmp(sess->session_game, "SDODC_GARAGE") != 0)
+	discord_game_created(pl->username, sess->session_name, sess->session_gameinfo);
+#endif
     } else {
       gs_error("Trying to lock session that doesn't exist");
     }

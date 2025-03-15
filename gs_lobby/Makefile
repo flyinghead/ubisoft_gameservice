@@ -1,19 +1,27 @@
 CC = gcc
 TARGET = gs_lobby gs_gameserver
-CFLAGS = -Wconversion -Wall
-LFLAGS = -lpthread -lsqlite3 -lm -lrt
-SRC = gs_waitmodule.c gs_lobby.c gs_sql.c ../gs_common/gs_common.c ../gs_common/gs_msg.c
-SRC_2 = gs_gameserver.c gs_sql.c ../gs_common/gs_common.c ../gs_common/gs_msg.c
-DEP = $(SRC) gs_waitmodule.h gs_lobby.h gs_sql.h ../gs_common/gs_common.h ../gs_common/gs_msg.h
-DEP_2 = $(SRC_2) gs_gameserver.h gs_sql.h ../gs_common/gs_common.h ../gs_common/gs_msg.h
+CFLAGS = -Wconversion -Wall -g
+LFLAGS := -lpthread -lsqlite3 -lm -lrt
+DEPS = gs_waitmodule.h gs_lobby.h gs_gameserver.h gs_sql.h ../gs_common/gs_common.h ../gs_common/gs_msg.h Makefile
+COMMON_OBJS := gs_sql.o ../gs_common/gs_common.o ../gs_common/gs_msg.o
+DISCORD = ON
+
+ifeq ($(DISCORD), ON)
+  CFLAGS := $(CFLAGS) -DDISCORD
+  COMMON_OBJS := $(COMMON_OBJS) discord.o
+  LFLAGS := $(LFLAGS) -lcurl
+endif
 
 all: $(TARGET)
 
-gs_lobby: $(DEP)
-	$(CC) $(CFLAGS) $(SRC) -o $@ $(LFLAGS)
+%.o: %.c $(DEPS)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-gs_gameserver: $(DEP_2)
-	$(CC) $(CFLAGS) $(SRC_2) -o $@ $(LFLAGS)
+gs_lobby: gs_waitmodule.o gs_lobby.o $(COMMON_OBJS)
+	$(CC) $(CFLAGS) gs_waitmodule.o gs_lobby.o $(COMMON_OBJS) -o $@ $(LFLAGS)
+
+gs_gameserver: gs_gameserver.o $(COMMON_OBJS)
+	$(CC) $(CFLAGS) gs_gameserver.o $(COMMON_OBJS) -o $@ $(LFLAGS)
 
 clean:
-	rm $(TARGET)
+	rm -f *.o $(TARGET)

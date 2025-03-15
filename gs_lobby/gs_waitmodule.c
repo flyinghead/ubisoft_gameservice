@@ -34,6 +34,7 @@
 #include "gs_sql.h"
 #include "../gs_common/gs_common.h"
 #include "../gs_common/gs_msg.h"
+#include "discord.h"
 
 #define USER_DOESNT_EXIST 1
 #define PASSWORD_INCORRECT 2
@@ -76,11 +77,13 @@ int get_server_config(server_data_t *s, char *fn) {
   int arena_id = 0, basicgroup_id = 0, start_session_id = 0;
   int max_sessions = 0, max_players = 0;
   char server_ip[16], server_db_path[256], buf[1024], server_name[32];
+  char discord_url[128];
   
   memset(buf, 0, sizeof(buf));
   memset(server_ip, 0, sizeof(server_ip));
   memset(server_db_path, 0, sizeof(server_db_path));
   server_name[0] = '\0';
+  discord_url[0] = '\0';
   
   if (file != NULL) {
     while (fgets(buf, sizeof(buf), file) != NULL) {
@@ -95,6 +98,7 @@ int get_server_config(server_data_t *s, char *fn) {
       sscanf(buf, "SERVER_MAX_SESSIONS=%d", &max_sessions);    
       sscanf(buf, "SERVER_DB_PATH=%s", server_db_path);
       sscanf(buf, "SERVER_NAME=%31s", server_name);
+      sscanf(buf, "DISCORD_URL=%s", discord_url);
     }
     fclose(file);
   } else {
@@ -174,6 +178,10 @@ int get_server_config(server_data_t *s, char *fn) {
     gs_info("Server type is wrong %d", s->server_type);
     return 0;
   }
+#ifdef DISCORD
+  if (discord_url[0] != '\0')
+    set_discord_params(s->server_type, discord_url);
+#endif
   
   gs_info("Loaded Config:");
   gs_info("\tSERVER_IP: %s", s->server_ip);
