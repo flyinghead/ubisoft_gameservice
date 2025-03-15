@@ -229,7 +229,6 @@ void init_server(int argc, char *argv[], server_data_t *s) {
 int add_waitmodule_player(server_data_t *s, player_t *pl) {
   int i;
   uint16_t max_players = s->max_players;
-  memset(pl->username, 0, MAX_UNAME_LEN);
 
   pthread_mutex_lock(&s->wm_mutex);
   for(i=0;i<max_players;i++) {
@@ -620,7 +619,7 @@ int main(int argc, char *argv[]) {
   
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
     //Store player data
-    player_t *pl = (player_t *)malloc(sizeof(player_t));
+    player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = &s_data;

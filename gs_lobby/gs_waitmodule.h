@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <time.h>
 
+#define MAX_PLAYERS 6
+
 typedef struct server_data server_data_t;
 
 typedef struct {
@@ -46,7 +48,7 @@ typedef struct {
   uint32_t session_config;
   uint16_t session_gameport;
   time_t session_start;
-  player_t **p_l;
+  player_t *players[MAX_PLAYERS];
   server_data_t *server;
   int gameserver_pipe;
   pthread_t pipe_thread;

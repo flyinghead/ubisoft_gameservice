@@ -142,9 +142,9 @@ void *gameserver_pipe_handler(void *data) {
 	  {
 	      server_data_t *server = sess->server;
 	      pthread_mutex_lock(&server->mutex);
-	      for (int i = 0; i < sess->session_max_players; i++) {
-	        if (sess->p_l[i] && !strcmp(sess->p_l[i]->username, username)) {
-	          if (player_cleanup(server, sess->p_l[i])) {
+	      for (int i = 0; i < MAX_PLAYERS; i++) {
+	        if (sess->players[i] && !strcmp(sess->players[i]->username, username)) {
+	          if (player_cleanup(server, sess->players[i])) {
 	            /* session has been deleted */
 	            pthread_mutex_unlock(&server->mutex);
 	            return NULL;
@@ -400,32 +400,25 @@ void *keepalive_server_handler(void *data)
 }
 
 int send_msg_to_session(session_t *sess, char* msg, uint16_t pkt_size) {
-  int i;
-
   if (sess == NULL)
     return 0;
   
   gs_encode_data((uint8_t*)(msg+6), (size_t)(pkt_size-6));
   
-  for(i = 0; i < sess->session_max_players; i++) {
-    if (sess->p_l[i]) {
-      write(sess->p_l[i]->sock, msg, pkt_size);
-    }
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (sess->players[i])
+      write(sess->players[i]->sock, msg, pkt_size);
   }
   
   return 0;
 }
 
 void send_other_players_in_lobby(server_data_t *s, player_t* pl, char* msg) {
-  int i;
-  uint16_t pkt_size = 0;
-  
-  for (i = 0; i < s->max_players; i++) {
+  for (int i = 0; i < s->max_players; i++) {
     /* Send to other players which is not in a game */
     player_t *player = s->server_p_l[i];
-    if (player &&
-	player->player_id != pl->player_id) {
-      pkt_size = create_joinnew(&msg[6], player->username, s->basicgroup_id);
+    if (player && player->player_id != pl->player_id) {
+      uint16_t pkt_size = create_joinnew(&msg[6], player->username, s->basicgroup_id);
       pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
       send_gs_msg(pl->sock, msg, pkt_size);
       /* SDO wants both the join group and the join session */
@@ -442,15 +435,12 @@ void send_other_players_in_lobby(server_data_t *s, player_t* pl, char* msg) {
 }
 
 void send_other_players_in_session(session_t *sess, player_t* pl, char* msg) {
-  int i;
-  uint16_t pkt_size = 0;
-  
   if (sess == NULL)
     return;
   
-  for(i = 0; i < sess->session_max_players; i++) {
-    if (sess->p_l[i] && sess->p_l[i]->player_id != pl->player_id) {
-      pkt_size = create_joinnew(&msg[6], sess->p_l[i]->username, sess->session_id);
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (sess->players[i] && sess->players[i]->player_id != pl->player_id) {
+      uint16_t pkt_size = create_joinnew(&msg[6], sess->players[i]->username, sess->session_id);
       pkt_size = create_gs_hdr(msg, JOINNEW, 0x24, pkt_size);
       send_gs_msg(pl->sock, msg, pkt_size);
     }
@@ -458,16 +448,12 @@ void send_other_players_in_session(session_t *sess, player_t* pl, char* msg) {
 }
 
 void send_other_players_ping_in_session(session_t *sess, player_t* pl, char* msg) {
-
-  int i;
-  uint16_t pkt_size = 0;
-  
   if (sess == NULL)
     return;
   
-  for(i = 0; i < sess->session_max_players; i++) {
-    if (sess->p_l[i] && sess->p_l[i]->player_id != pl->player_id) {
-      pkt_size = create_updateplayerping(&msg[6], sess->p_l[i]->username, sess->session_id, sess->p_l[i]->ping);
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (sess->players[i] && sess->players[i]->player_id != pl->player_id) {
+      uint16_t pkt_size = create_updateplayerping(&msg[6], sess->players[i]->username, sess->session_id, sess->players[i]->ping);
       pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
       send_gs_msg(pl->sock, msg, pkt_size);
     }
@@ -475,14 +461,12 @@ void send_other_players_ping_in_session(session_t *sess, player_t* pl, char* msg
 }
 
 void send_msg_to_others_in_lobby(server_data_t* s, player_t* pl, char* msg, uint16_t pkt_size) {
-  int i;
-
   if (s == NULL)
     return;
   
   gs_encode_data((uint8_t*)(msg+6), (size_t)(pkt_size-6));
   
-  for(i = 0; i < s->max_players; i++) {
+  for (int i = 0; i < s->max_players; i++) {
     /* Send to all players which is not in a game */
     if (s->server_p_l[i] &&
 	s->server_p_l[i]->in_game == 0 &&
@@ -493,15 +477,13 @@ void send_msg_to_others_in_lobby(server_data_t* s, player_t* pl, char* msg, uint
 }
 
 void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size) {
-  int i;
-
   if (s == NULL)
     return;
 
   gs_encode_data((uint8_t*)(msg+6), (size_t)(pkt_size-6));
   
   pthread_mutex_lock(&s->mutex);
-  for(i = 0; i < s->max_players; i++) {
+  for (int i = 0; i < s->max_players; i++) {
     /* Send to all players which is not in a game */
     if (s->server_p_l[i] &&
 	s->server_p_l[i]->in_game == 0) {
@@ -512,28 +494,20 @@ void send_msg_to_lobby(server_data_t* s, char* msg, uint16_t pkt_size) {
 }
 
 session_t* find_server_session(server_data_t *s, uint32_t session_id) {
-  uint16_t max_sessions = s->max_sessions;
-  session_t* sess = NULL;
-  int i;
-  
-  for(i=0;i<max_sessions;i++) {
-    if(s->s_l[i] && s->s_l[i]->session_id == session_id) {
-      sess = s->s_l[i];
+  for (int i = 0; i < s->max_sessions; i++) {
+    session_t *sess = s->s_l[i];
+    if (sess && sess->session_id == session_id) {
       gs_info("Found session %s with groupid %d", sess->session_name, sess->session_id);
       return sess;
     }
   }
-  return sess;
+  return NULL;
 }
 
 int add_server_player(server_data_t *s, player_t *pl) {
-  int i;
-  uint16_t max_players = s->max_players;
-  memset(pl->username, 0, MAX_UNAME_LEN);
-
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<max_players;i++) {
-    if(!(s->server_p_l[i])) {
+  for (int i = 0 ; i < s->max_players; i++) {
+    if (!(s->server_p_l[i])) {
       s->server_p_l[i] = pl;
       s->group_size = s->group_size + 1;
       pthread_mutex_unlock(&s->mutex);
@@ -550,11 +524,9 @@ int add_server_player(server_data_t *s, player_t *pl) {
 
 void remove_server_player(player_t *pl) {
   server_data_t *s = pl->server;
-  int max_players = s->max_players;
-  int i=0;
   
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<max_players;i++) {
+  for (int i = 0; i < s->max_players; i++) {
     if (s->server_p_l[i] && s->server_p_l[i]->player_id == pl->player_id) {
       s->group_size = s->group_size - 1;
       player_cleanup(s, pl);
@@ -568,7 +540,6 @@ void remove_server_player(player_t *pl) {
 }
 
 int add_player_to_session(session_t *sess, player_t *pl) {
-  int i;
   server_data_t *s = pl->server;
 
   /* Sometimes people can break a session creation, this will hopefully remove the stale session */
@@ -588,11 +559,11 @@ int add_player_to_session(session_t *sess, player_t *pl) {
   }
   
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<sess->session_max_players;i++) {
-     if(!(sess->p_l[i])) {
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+     if(!(sess->players[i])) {
        gs_info("Added player %s to %s", pl->username, sess->session_name);
        sess->session_nb_players = sess->session_nb_players + 1;
-       sess->p_l[i] = pl;
+       sess->players[i] = pl;
        pl->in_session_id = sess->session_id;
        pthread_mutex_unlock(&s->mutex);
        return 1;
@@ -605,18 +576,16 @@ int add_player_to_session(session_t *sess, player_t *pl) {
 }
 
 void remove_player_from_session(session_t *sess, player_t *pl) {
-  int i=0;
-      
   pthread_mutex_lock(&sess->server->mutex);
-  for(i=0;i<sess->session_max_players;i++) {
-    if (sess->p_l[i] &&
-	sess->p_l[i]->player_id == pl->player_id) {
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (sess->players[i] &&
+	sess->players[i]->player_id == pl->player_id) {
       
       gs_info("Removed player %s (0x%02x) from %s", pl->username, pl->player_id, sess->session_name);
       sess->session_nb_players = sess->session_nb_players - 1;
 
       pl->in_session_id = 0;
-      sess->p_l[i] = NULL;
+      sess->players[i] = NULL;
       break;
     }
   }
@@ -649,7 +618,6 @@ void remove_server_session(server_data_t *s, session_t *sess) {
       while (lock_count-- > 0)
 	pthread_mutex_lock(&s->mutex);
   }
-  free(sess->p_l);
   free(sess);
 }
 
@@ -658,7 +626,7 @@ int player_cleanup(server_data_t *s, player_t *pl) {
   uint16_t pkt_size = 0;
   session_t* sess = NULL;
   char msg[MAX_PKT_SIZE];
-  int i=0, hit=0;
+  int hit=0;
   
   if (pl == NULL) {
     gs_info("Player cleanup with a NULL pointer is bad");
@@ -668,15 +636,13 @@ int player_cleanup(server_data_t *s, player_t *pl) {
   sess = find_server_session(s, pl->in_session_id);
   if (sess != NULL) {
 
-    for (i = 0; i < sess->session_max_players; i++) {
-      if (sess->p_l[i]) {
-	if (sess->p_l[i]->username[0] != '\0') {
-	  if( strcmp(pl->username, sess->p_l[i]->username) == 0 ) {
-	    gs_info("Player %s still in session %d, remove...", pl->username, sess->session_id);
-	    hit = 1;
-	    break;
-	  }
-	}
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+      if (sess->players[i]
+		&& sess->players[i]->username[0] != '\0'
+		&& strcmp(pl->username, sess->players[i]->username) == 0) {
+	  gs_info("Player %s still in session %d, remove...", pl->username, sess->session_id);
+	  hit = 1;
+	  break;
       }
     }
 
@@ -731,9 +697,6 @@ int add_server_session(server_data_t *s,
 		       uint32_t session_pgroupid,
 		       uint32_t session_unknown_1,
 		       uint32_t session_unknown_2) {
- 
-  int i;
-  uint16_t max_sessions = s->max_sessions;
   
   if (strlen(session_name) > sizeof(sess->session_name)) {
     gs_info("Session name is larger then buffer");
@@ -798,10 +761,8 @@ int add_server_session(server_data_t *s,
   else
     sess->session_master_player_id = 0;
 
-  sess->p_l = calloc(sess->session_max_players, sizeof(player_t *));
-
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<max_sessions;i++) {
+  for (int i = 0; i < s->max_sessions; i++) {
     if(!(s->s_l[i])) {
       s->s_l[i] = sess;
       sess->session_id = s->start_session_id + (uint32_t)i;
@@ -1082,7 +1043,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
 	    byte_array[0], byte_array[1], byte_array[2], byte_array[3],
 	    byte_array[4], byte_array[5], byte_array[6]);
 
-    sess = (session_t *)malloc(sizeof(session_t));
+    sess = (session_t *)calloc(1, sizeof(session_t));
     pthread_mutex_lock(&s->mutex);
     if (!add_server_session(s,
 			    sess,
@@ -1354,7 +1315,7 @@ void *gs_server_handler(void* data) {
 
   /* If POD add chat-session */
   if (s_data->server_type == POD_SERVER) {
-    session_t *sess = (session_t *)malloc(sizeof(session_t));     
+    session_t *sess = (session_t *)calloc(1, sizeof(session_t));
     if (!add_server_session(s_data,
 			    sess,
 			    NULL,
@@ -1378,16 +1339,12 @@ void *gs_server_handler(void* data) {
   
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
     //Store player data
-    player_t *pl = (player_t *)malloc(sizeof(player_t));
+    player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = s_data;
     pl->player_id = (uint32_t)(client_sock + 0x0100);
     pl->keepalive = time(NULL);
-    pl->in_session_id = 0;
-    pl->in_game = 0;
-    pl->trophies = 0;
-    pl->points = 0;
     pl->ping = 10;
     if (!add_server_player(s_data, pl)) {
         free(pl);
