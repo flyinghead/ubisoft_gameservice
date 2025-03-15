@@ -130,9 +130,10 @@ void send_udp_player(player_t *player, char* msg, uint16_t pkt_size)
     last_ack_seq |= RUDP_FLAG;
   uint24_to_char(last_ack_seq, &msg[3]);
 
-//  uint16_t pred_cli_time = (uint16_t)(char_to_uint16(&msg[6]) + player->udp.clock_diff);
-//  uint16_to_char(pred_cli_time, &msg[8]);
-  uint16_to_char(player->udp.last_time, &msg[8]); // FIXME this gives better internal ping values (150 instead of 10)
+  uint16_t pred_cli_time = 0;
+  if (player->udp.last_time)
+    pred_cli_time = (uint16_t)(char_to_uint16(&msg[6]) + player->udp.last_time - (uint16_t)player->udp.last_update);
+  uint16_to_char(pred_cli_time, &msg[8]);
 
   sendto(player->server->udp_sock, msg, (size_t)pkt_size, 0,
 	 (struct sockaddr*)&player->udp.addr,
@@ -284,20 +285,15 @@ uint16_t create_event_playerinfos(char* msg, uint16_t playerid, uint32_t points,
 }
 
 /* Create server time message */
-uint16_t create_event_servertime(char* msg, struct timespec start_time) {
-  uint16_t pkt_size = 0;
-  struct timespec end_time;
-  clock_gettime(CLOCK_REALTIME, &end_time);
-  uint32_t elapsed_sec = 0, elapsed_msec = 0;
-
-  elapsed_sec = (uint32_t)(end_time.tv_sec);
-  elapsed_msec = (uint32_t)((end_time.tv_nsec)/1000000);
+uint16_t create_event_servertime(char* msg, time_t start_time) {
+  time_t server_time = get_time_ms() - start_time;
+  uint32_t sec = (uint32_t)(server_time / 1000);
+  uint32_t msec = (uint32_t)(server_time % 1000);
   
-  memcpy(msg, &elapsed_sec, sizeof(uint32_t));
-  memcpy(&msg[4], &elapsed_msec, sizeof(uint32_t));
-  pkt_size = sizeof(uint32_t)*2;
+  memcpy(msg, &sec, sizeof(uint32_t));
+  memcpy(&msg[4], &msec, sizeof(uint32_t));
   
-  return (uint16_t)pkt_size;
+  return sizeof(uint32_t) * 2;
 }
 
 /* Create new master message */
@@ -332,41 +328,52 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
 void remove_gameserver_player(player_t *pl, char* msg) {
   server_data_t *s = pl->server;
   int max_players = s->max_players;
-  uint16_t pkt_size = 0;
-  int i=0;
+  int i;
 
-  /* Send player left */
-  pkt_size = create_event_playerleft(&msg[8], pl->player_id);
-  pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_PLAYERLEFT, SENDTOSERVER, pkt_size);
-  send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
+  if (pl->player_id != 0) {
+    /* Send player left */
+    uint16_t pkt_size = create_event_playerleft(&msg[8], pl->player_id);
+    pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_PLAYERLEFT, SENDTOSERVER, pkt_size);
+    send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
 
-  pthread_mutex_lock(&s->mutex);
-  /* If master left, change to the next in list */
-  if(pl->is_master == 1) {
-    s->master_id = 0;
+    pthread_mutex_lock(&s->mutex);
+    /* If master left, change to the next in list */
+    if(pl->is_master == 1) {
+      s->master_id = 0;
+      for(i=0;i<max_players;i++) {
+	player_t *new_master = s->p_l[i];
+	if (new_master && new_master->player_id != pl->player_id && new_master->player_id != 0) {
+	  s->master_id = new_master->player_id;
+	  s->master[0] = '\0';
+	  new_master->is_master = 1;
+	  gs_info("Master left the game, change to 0x%02x: %s", s->master_id, new_master->username);
+	  pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
+	  pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWMASTER, SENDTOSERVER, pkt_size);
+	  send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
+	  break;
+	}
+      }
+      if (s->master_id == 0 && s->current_nr_of_players >= 2)
+	gs_info("GAMESERVER%d - Can't find a new master. Aborting", s->game_tcp_port);
+    }
+
+    /* Find and remove user */
     for(i=0;i<max_players;i++) {
-      player_t *new_master = s->p_l[i];
-      if (new_master && new_master->player_id != pl->player_id && new_master->player_id != 0) {
-	s->master_id = new_master->player_id;
-	s->master[0] = '\0';
-	new_master->is_master = 1;
-	gs_info("Master left the game, change to 0x%02x: %s", s->master_id, new_master->username);
-	pkt_size = create_event_newmaster(&msg[8], (uint16_t)s->master_id);
-	pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWMASTER, SENDTOSERVER, pkt_size);
-	send_functions(SENDTOOTHERPLAYERS, msg, pkt_size, s, pl->player_id);
-	break;
+      if (s->p_l[i] && s->p_l[i]->player_id == pl->player_id) {
+	gs_info("GAMESERVER%d - Removed player with 0x%02x", s->game_tcp_port, pl->player_id);
+	s->p_l[i] = NULL;
+	s->current_nr_of_players = (uint8_t)(s->current_nr_of_players - 1);
       }
     }
-    if (s->master_id == 0 && s->current_nr_of_players >= 2)
-      gs_info("GAMESERVER%d - Can't find a new master. Aborting", s->game_tcp_port);
   }
-
-  /* Find and remove user */
-  for(i=0;i<max_players;i++) {
-    if (s->p_l[i] && s->p_l[i]->player_id == pl->player_id) {
-      gs_info("GAMESERVER%d - Removed player with 0x%02x", s->game_tcp_port, pl->player_id);
-      s->p_l[i] = NULL;
-      s->current_nr_of_players = (uint8_t)(s->current_nr_of_players - 1);
+  else {
+    /* Player hasn't registered and is unknown */
+    pthread_mutex_lock(&s->mutex);
+    for (i = 0; i < max_players; i++) {
+      if (s->p_l[i] == pl) {
+	s->p_l[i] = NULL;
+	break;
+      }
     }
   }
   free(pl);
@@ -459,7 +466,7 @@ void lobby_kick_player(server_data_t *server, uint16_t player_id)
  *  returns: pkt size
  *
  */
-uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
+ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf_len) {
   server_data_t *s = pl->server;
   uint16_t pkt_size = 0, recv_size = 0;
   uint8_t send_flag = 0, recv_flag = 0;
@@ -1048,6 +1055,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_LOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
+      s->locked = 1;
       {
     	char msg = 'L';
     	ssize_t ret = write(s->lobby_pipe, &msg, sizeof(msg));
@@ -1062,6 +1070,7 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UNLOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
+      s->locked = 0;
       {
     	char msg = 'U';
     	ssize_t ret = write(s->lobby_pipe, &msg, sizeof(msg));
@@ -1227,9 +1236,15 @@ uint16_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, in
       return 0;
     }
   } else if (send_flag == SENDTOPLAYER) {
+    if (buf[7] == SDO_START_SYNCHRO)
+      gs_info("%s -> %d: SDO_START_SYNCHRO", pl->username, ntohs(char_to_uint16(&buf[0x08])));
     if (recv_size >= 0xA)
       send_functions(send_flag, buf, (uint16_t)buf_len, s, ntohs(char_to_uint16(&buf[0x08])));
   } else {
+    if (buf[7] == SDO_START_RACE)
+      gs_info("GAMESERVER%d - Race start", s->game_tcp_port);
+    else if (buf[7] == SDO_START_TIME)
+      gs_info("GAMESERVER%d - %s to all(%d): Time start", s->game_tcp_port, pl->username, send_flag);
     send_functions(send_flag, buf, (uint16_t)buf_len, s, pl->player_id);
   }
 
@@ -1308,10 +1323,6 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
       pl->udp.last_rel_ack_seq = pl->udp.last_ack_seq;
   }
   pl->udp.last_time = char_to_uint16(&buf[6]);
-  uint16_t pred_clock = char_to_uint16(&buf[8]);
-  if (pred_clock != 0)
-    /* TODO moving average? */
-    pl->udp.clock_diff = pl->udp.last_time - pred_clock;
   pl->udp.last_update = now;
 
   /* Respond to packets to the server */
@@ -1351,8 +1362,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    {
 	      uint32_t rate = char_to_uint32(p - 4);
 	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
-	      uint32_to_char(rate, &msg[pkt_size + 4]);
-	      pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)EVENT_RATE, SENDTOPLAYER, 4);
+	      pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)SDO_DUMMY, SENDTOPLAYER, 0);
 	    }
 	    break;
 
@@ -1374,8 +1384,10 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	/* will ack when players ack */
 	cli_seq &= RUDP_MASK;
       create_gameserver_udp_header(msg, cli_seq);
-//      uint16_to_char((uint16_t)(now + pl->udp.clock_diff), &msg[8]);
-      uint16_to_char(pl->udp.last_time, &msg[8]);
+      uint16_t pred_cli_time = 0;
+      if (pl->udp.last_time)
+	pred_cli_time = (uint16_t)(char_to_uint16(&msg[6]) + pl->udp.last_time - (uint16_t)pl->udp.last_update);
+      uint16_to_char(pred_cli_time, &msg[8]);
       sendto(s->udp_sock, msg, (size_t)pkt_size, 0,
 	     (struct sockaddr*)&pl->udp.addr,
 	     (socklen_t)sizeof(struct sockaddr_in));
@@ -1508,11 +1520,8 @@ void *gameserver_udp_server_handler(void *data) {
 void *gs_gameserver_client_handler(void *data) {
   player_t *pl = (player_t *)data;
   int sock = pl->sock; 
-  ssize_t read_size=0;
-  size_t write_size=0;
+  ssize_t read_size;
   char c_msg[MAX_PKT_SIZE], s_msg[MAX_PKT_SIZE];
-  memset(c_msg, 0, sizeof(c_msg));
-  memset(s_msg, 0, sizeof(s_msg));
   server_data_t *s = pl->server;
 
   struct timeval tv;
@@ -1523,17 +1532,18 @@ void *gs_gameserver_client_handler(void *data) {
   
   int index = 0;
   //Receive a message from client
-  while( (read_size = recv(sock, &c_msg[index], sizeof(c_msg) - (size_t)index, 0)) > 0 ) {
+  while ((read_size = recv(sock, &c_msg[index], sizeof(c_msg) - (size_t)index, 0)) > 0) {
     read_size += index;
     index = 0;
-    while(read_size > 0) {
+    while (read_size > 0) {
       int n_index;
       if ((n_index = parse_gameserver_header(&c_msg[index], (int)read_size)) > 0) {
-	write_size = gameserver_msg_handler(sock, pl, s_msg, &c_msg[index], (int)n_index);
+	memset(s_msg, 0, sizeof(s_msg));
+	ssize_t write_size = gameserver_msg_handler(sock, pl, s_msg, &c_msg[index], (int)n_index);
 	if (write_size > 0) {
-	  write(sock, s_msg, write_size);
+	  write(sock, s_msg, (size_t)write_size);
 	}
-	if (write_size < 0) {
+	else if (write_size < 0) {
 	  gs_error("GAMESERVER%d - Client with socket %d is not following protocol - Disconnecting", s->game_tcp_port, sock);
 	  close(sock);
 	  remove_gameserver_player(pl, s_msg);
@@ -1544,21 +1554,24 @@ void *gs_gameserver_client_handler(void *data) {
 	//Update pointer in recv buff
 	index += n_index;
       } else {
-	if (read_size > 0)
+	if (read_size == sizeof(c_msg)) {
+	    gs_error("GAMESERVER%d - Client with socket %d large packet - Disconnecting", s->game_tcp_port, sock);
+	    close(sock);
+	    remove_gameserver_player(pl, s_msg);
+	    return 0;
+	}
+	if (read_size > 0 && index > 0)
 	  // move partial packet to beginning of buffer
 	  memmove(&c_msg[0], &c_msg[index], (size_t)read_size);
 	index = (int)read_size;
 	break;
       }
-      memset(s_msg, 0, sizeof(s_msg));
       if (read_size == 0)
 	index = 0;
     }
-    fflush(stdout);
   }
   
   close(sock);
-  fflush(stdout);
   remove_gameserver_player(pl, s_msg);
   
   return 0;
@@ -1682,7 +1695,7 @@ int main (int argc, char *argv[]) {
     return 0;
   }
 
-  clock_gettime(CLOCK_REALTIME, &server_data.start_time);
+  server_data.start_time = get_time_ms();
  
   gs_info("GAMESERVER%d - Starting game server with TCP-Port: %d UDP-port: %d Master: %s Max Players: %d DB PATH: %s SERVER TYPE: %d",
 	  server_data.game_tcp_port, server_data.game_tcp_port, server_data.game_udp_port, server_data.master, server_data.max_players, server_data.server_db_path, server_data.server_type);
@@ -1721,11 +1734,17 @@ int main (int argc, char *argv[]) {
   pthread_detach(thread_id_udp);
     
   while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) >= 0) {
+    if (server_data.locked) {
+      gs_error("Game server locked. Connection refused");
+      close(client_sock);
+      continue;
+    }
     //Store player data
     player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;
     pl->sock = client_sock;
     pl->server = &server_data;
+    pl->udp.last_update = get_time_ms();
     if (!add_gameserver_player(&server_data, pl)) {
       free(pl);
       close(client_sock);

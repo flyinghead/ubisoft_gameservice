@@ -4,6 +4,7 @@
   Author Shuouma
 
 */
+#include <time.h>
 #include <sqlite3.h>
 #include <pthread.h>
 #include "../gs_common/gs_common.h"
@@ -56,7 +57,6 @@ typedef struct {
     uint32_t last_ack_seq;
     uint32_t last_rel_ack_seq;
     uint16_t last_time;
-    uint16_t clock_diff;
     time_t last_update;
     struct sockaddr_in addr;
     struct {
@@ -81,7 +81,7 @@ struct server_data {
   uint8_t current_nr_of_players;
   uint16_t game_tcp_port;
   uint16_t game_udp_port;
-  struct timespec start_time;
+  time_t start_time;
   char master[MAX_UNAME_LEN];
   char server_db_path[MAX_UNAME_LEN];
   char pidfile[32];
@@ -91,6 +91,7 @@ struct server_data {
   int lobby_pipe;
   pthread_mutex_t mutex;
   char session_info[32];
+  int locked;
 };
 
 void *gs_gameserver_handler(void* data);
