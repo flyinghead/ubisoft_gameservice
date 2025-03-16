@@ -753,7 +753,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     case SDO_GAME_DEFINES:
       gs_info("Got GAME_DEFINES");
       print_gs_data(buf, (long unsigned int)buf_len);
-      // TODO
       // loop 4: loop 5 ints -> gameDefines[4-23]
       // int -> gameDef[0]
       // int ->         1
@@ -1024,7 +1023,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	unsigned idx = 9;
 	uint32_t passwd_size = char_to_uint32(&buf[idx]);
 	idx += 4 + passwd_size;
-	//uint32_t max_players = char_to_uint32(&buf[idx]);
+	s->max_players = (uint8_t)char_to_uint32(&buf[idx]);
 	idx += 4;
 	idx += 4; // unknown
 	strlcpy(s->session_info, &buf[idx], sizeof(s->session_info));

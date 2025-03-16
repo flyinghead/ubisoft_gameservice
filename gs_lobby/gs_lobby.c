@@ -1049,7 +1049,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       gs_error("Got %d values from CREATESESSION packet needs 7", nr_b_parsed);
       return 0;
     }
-    gs_info("lobby: %s CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d mapp %d maxo %d gid %d pgid %d unk %d %d",
+    gs_info("lobby: %s CREATESESSION '%s' '%s' '%s' '%s' '%s' ver %d maxp %d maxo %d gid %d pgid %d unk %d %d",
 	    pl->username,
 	    tok_array[0], tok_array[1], tok_array[2], tok_array[3], tok_array[4],
 	    byte_array[0], byte_array[1], byte_array[2], byte_array[3],

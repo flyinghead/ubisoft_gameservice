@@ -157,6 +157,13 @@ static void postWebhook(Notif *notif)
 
 void discord_user_joined(const char *player, const char **lobby_players, int count)
 {
+  /* Not thread safe but the worst that can happen is 2 notifications at the same time */
+  static time_t last_notif;
+  time_t now = get_time_ms();
+  if (last_notif != 0 && now - last_notif < 5 * 60 * 1000)
+    /* No more than one notification every 5 min */
+    return;
+  last_notif = now;
   Notif *notif = (Notif *)calloc(1, sizeof(Notif));
   asprintf(&notif->content, "Player **%s** joined the race lobby", player);
   notif->embedTitle = strdup("Lobby Players");
