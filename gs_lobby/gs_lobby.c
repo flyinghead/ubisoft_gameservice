@@ -911,7 +911,6 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     pthread_mutex_lock(&s->mutex);
     sess = find_server_session(s, groupid);
     gs_info("lobby: %s JOINSESSION %s %s groupid=%d %d session=%p", pl->username, tok_array[0], tok_array[1], byte_array[0], byte_array[1], sess);
-    print_gs_data(buf, (long unsigned int)buf_len);
 
     /* Joining a session */
     if (sess != NULL) {

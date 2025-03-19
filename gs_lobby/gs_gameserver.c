@@ -1116,8 +1116,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       return 0;
 
     case SDO_VERSION_CHECK:
-      gs_info("Got VERSION_CHECK");
-      print_gs_data(buf, (long unsigned int)buf_len);
       msg[8] = 1;	// OK
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_VERSION_CHECK, SENDTOPLAYER, 1);
       write(pl->sock, msg, pkt_size);
@@ -1127,8 +1125,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_PRICES_LIST:
-      gs_info("Got PRICES_LIST");
-      print_gs_data(buf, (long unsigned int)buf_len);
       // int(be) [1-8] type
       // type 1: car
       //	int(be) car# [0-21]
@@ -1172,15 +1168,11 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_GAME_DEFINES:
-      gs_info("Got GAME_DEFINES");
-      print_gs_data(buf, (long unsigned int)buf_len);
       pkt_size = create_reply_game_defines(&msg[8], s);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GAME_DEFINES, SENDTOPLAYER, pkt_size);
       break;
 
     case SDO_DBINFO_PLAYERDATA:
-      gs_info("Got DBINFO_PLAYERDATA");
-      print_gs_data(buf, (long unsigned int)buf_len);
       pkt_size = create_reply_playerdata(&msg[8], pl);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_PLAYERDATA, SENDTOPLAYER, pkt_size);
       break;
@@ -1198,8 +1190,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
     case SDO_DBINFO_FULLSTATS:
       {
-	gs_info("Got DBINFO_FULLSTATS");
-	print_gs_data(buf, (long unsigned int)buf_len);
 	msg[8] = buf[8]; // need to send back the value
 	msg[9] = buf[9];
 	int size = MAX_PKT_SIZE - 10;
@@ -1241,7 +1231,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_REQUEST_MOTD:
-      gs_info("Got REQUEST_MOTD");
       print_gs_data(buf, (long unsigned int)buf_len);
       load_motd(s->db, &msg[8], MAX_PKT_SIZE - 8);
       pkt_size = (uint16_t)(strlen(&msg[8]) + 1);
@@ -1291,7 +1280,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
     case SDO_LOCK_ROOM:
       gs_info("Got SDO_LOCK_ROOM");
-      print_gs_data(buf, (long unsigned int)buf_len);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_LOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
@@ -1306,7 +1294,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
     case SDO_UNLOCK_ROOM:
       gs_info("Got SDO_UNLOCK_ROOM");
-      print_gs_data(buf, (long unsigned int)buf_len);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_UNLOCK_ROOM, SENDTOALLPLAYERS, 0);
       send_functions(SENDTOOTHERPLAYERS, msg, (uint16_t)pkt_size, s, pl->player_id);
       pkt_size = 0;
@@ -1320,7 +1307,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_COMMIT:
-      gs_info("Got SDO_COMMIT");
       break;
 
     case SDO_LOCAL_END_OF_RACE:
@@ -1334,6 +1320,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	pthread_mutex_lock(&s->mutex);
 	for (int i = 0; i < MAX_PLAYERS; i++) {
 	    if (s->players[i] && s->players[i]->player_id == kicked_id) {
+		gs_info("%s SDO_PLAYER_KICK %s", pl->username, s->players[i]->username);
 		pkt_size = (uint16_t)uint32_to_char(1, &msg[8]);
 		pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PLAYER_KICK, SENDTOPLAYER, pkt_size);
 		write(s->players[i]->sock, msg, pkt_size);
@@ -1363,7 +1350,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     case SDO_TRACKRECORDS_UPDATE:
       {
 	gs_info("Got SDO_TRACKRECORDS_UPDATE");
-	print_gs_data(buf, (unsigned)buf_len);
 	// 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
 	//                                track#      mode
 	// 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
@@ -1397,7 +1383,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
     case SDO_TRACKRECORDS:
       gs_info("Got SDO_TRACKRECORDS");
-      print_gs_data(buf, (unsigned)buf_len);
       // holly reverse/mirror:
       // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 03
 
@@ -1427,7 +1412,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     case SDO_STATS_VENDETTAAVG:	// %: 990 is 0.099%
     case SDO_STATS_VENDETTAWIN:
       gs_info("Got SDO_STATS_xxx %02x", recv_flag);
-      print_gs_data(buf, (unsigned)buf_len);
       // 4 groups? * u8 count (< 10) * char name[16] + u32 driverPoints
       // groups: top 10, 5 players before, current player, 5 players after
       // count[0] ints
@@ -1446,7 +1430,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       // 0010 | 01 00 00 00             ?           race count  | ....
       //        wins
       gs_info("Got SDO_DBUPDATE_STANDARD");
-      print_gs_data(buf, (unsigned)buf_len);
       update_std_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
       break;
 
@@ -1456,7 +1439,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       // 0010 | 03 00 00 00 03 00 00 00 4E C3 00 00             | ........N...
       //        # trials    won trials  cash won ($49998)
       gs_info("Got SDO_DBUPDATE_TRIAL");
-      print_gs_data(buf, (unsigned)buf_len);
       update_trial_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16], *(int *)&buf[20], *(int *)&buf[24]);
       break;
 
