@@ -50,7 +50,7 @@ static int writeJsonString(char *json, const char *s)
   *j++ = '"';
   *j++ = '\0';
 
-  return j - json - 1;
+  return (int)(j - json - 1);
 }
 
 static void freeNotif(Notif *notif)

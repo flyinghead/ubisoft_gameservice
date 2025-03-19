@@ -86,7 +86,7 @@ struct server_data {
   char server_db_path[MAX_UNAME_LEN];
   char pidfile[32];
   uint16_t master_id;
-  player_t **p_l;
+  player_t *players[MAX_PLAYERS];
   sqlite3 *db;
   int lobby_pipe;
   pthread_mutex_t mutex;

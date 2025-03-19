@@ -277,6 +277,15 @@ const char *get_player_ip(player_t *player) {
   return str;
 }
 
+static char *trim(char *s) {
+  while (*s == ' ')
+    s++;
+  char *p = s + strlen(s) - 1;
+  while (p >= s && *p == ' ')
+    *p-- = '\0';
+  return s;
+}
+
 /*
  * Function: server_msg_handler
  * --------------------
@@ -343,12 +352,16 @@ ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       return 0;
 
     {
+      /* Trim white spaces. No idea why this happens sometimes */
+      char *username = trim(tok_array[0]);
+      if (username[0] == '\0')
+	return 0;
       /* Eject existing user with the same name if any */
-      player_t *other = find_user(s, tok_array[0], 0);
+      player_t *other = find_user(s, username, 0);
       if (other != NULL)
 	shutdown(other->sock, SHUT_RDWR);
 
-      strlcpy(pl->username, tok_array[0], sizeof(pl->username));
+      strlcpy(pl->username, username, sizeof(pl->username));
       gs_info("User %s is joining the waitmodule", pl->username);
       print_gs_data(buf, (unsigned)buf_len);
 
@@ -367,13 +380,13 @@ ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     if (rc != 1) {
       pkt_size = create_gsfail(&msg[6], LOGINWAITMODULE, LOGIN_FAILED);
       pkt_size = create_gs_hdr(msg, GSFAIL, 0x14, pkt_size);
-      return pkt_size;
     }
-    
-    pkt_size = create_gssuccessful(&msg[6], LOGINWAITMODULE);
-    pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
-   
-    break;;
+    else {
+      pkt_size = create_gssuccessful(&msg[6], LOGINWAITMODULE);
+      pkt_size = create_gs_hdr(msg, GSSUCCESS, 0x14, pkt_size);
+    }
+    break;
+
   case PLAYERINFO:
     if (nr_parsed != 1) {
       gs_error("Got %d strings from PLAYERINFO packet needs 1", nr_parsed);
@@ -383,7 +396,7 @@ ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     if (tok_array[0] == NULL)
       return 0;
 
-    username = tok_array[0];
+    username = trim(tok_array[0]);
 
     if (strcmp(pl->username, username) == 0 ) {
 

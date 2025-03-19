@@ -9,8 +9,6 @@
 #include <pthread.h>
 #include <time.h>
 
-#define MAX_PLAYERS 6
-
 typedef struct server_data server_data_t;
 
 typedef struct {

@@ -11,9 +11,9 @@ int load_fivescoreafter_record(sqlite3 *db, const char* username, char* msg, uin
 int load_fivescorebefore_record(sqlite3 *db, const char* username, char* msg, uint16_t max_pkt_size);
 int load_track_record(sqlite3 *db, char* msg, uint16_t max_pkt_size);
 /* SDO */
-int load_player_data(sqlite3 *db, const char* username, uint8_t *data, int *size);
+int load_player_data(sqlite3 *db, const char* username, uint8_t *data, unsigned *size);
 int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, int size);
-int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, int *size);
+int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, unsigned *size);
 int update_player_car(sqlite3 *db, const char* username, int carnum, const uint8_t *data, int size);
 int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int *size);
 int update_player_fullstats(sqlite3 *db, const char* username, const uint8_t *data, int size);

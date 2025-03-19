@@ -174,11 +174,11 @@ void *gameserver_pipe_handler(void *data) {
 static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   pid_t pid;
   int status;
-  int pipefd[2];
+  int pipefd[2] = { -1, -1 };
 
-  if (pipe2(pipefd, O_CLOEXEC)) {
-    perror("pipe2");
-    pipefd[0] = pipefd[1] = -1;
+  if (s->server_type == SDO_SERVER) {
+    if (pipe2(pipefd, O_CLOEXEC))
+      perror("pipe2");
   }
   char arg_1[16], arg_2[16], arg_3[32], arg_4[258], arg_5[16], arg_6[32];
   sprintf(arg_1, "-p %d", sess->session_gameport);
@@ -186,8 +186,9 @@ static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   sprintf(arg_3, "-m%s", sess->session_master);
   sprintf(arg_4, "-d%s", s->server_db_path);
   sprintf(arg_5, "-t %d", s->server_type);
+  arg_6[0] = '\0';
   char *argv[] = { "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, NULL, NULL };
-  int argc = 7;
+  int argc = 6 + (pipefd[0] != -1);
   if (!strcmp("SDODC", sess->session_game))
     /* dump received data */
     argv[argc++] = "-v";
@@ -197,8 +198,10 @@ static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
       /* Duplicate the writing end of the pipe so it's not closed.
        * Both file descriptors in pipefd[] will be closed on exec due to the O_CLOEXEC flag.
        */
-      int wpipefd = dup(pipefd[1]);
-      sprintf(arg_6, "-i %d", wpipefd);
+      if (pipefd[0] != -1) {
+	int wpipefd = dup(pipefd[1]);
+	sprintf(arg_6, "-i %d", wpipefd);
+      }
       gs_info("Starting GameServer with args %s %s %s %s %s %s %s",
 	      arg_1, arg_2, arg_3, arg_4,
 	      arg_5, arg_6, argc >= 8 ? argv[7] : "");
@@ -207,13 +210,15 @@ static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
       exit(0);
     }
   } else {
-    /* close the writing end of the pipe */
-    close(pipefd[1]);
-    /* and keep the reading end */
-    sess->gameserver_pipe = pipefd[0];
-    /* create the pipe reading thread but don't detach it so we can stop it cleanly */
-    if (pthread_create(&sess->pipe_thread, NULL, gameserver_pipe_handler, sess) < 0)
-      gs_error("Could not create thread");
+    if (pipefd[1] != -1) {
+      /* close the writing end of the pipe */
+      close(pipefd[1]);
+      /* and keep the reading end */
+      sess->gameserver_pipe = pipefd[0];
+      /* create the pipe reading thread but don't detach it so we can stop it cleanly */
+      if (pthread_create(&sess->pipe_thread, NULL, gameserver_pipe_handler, sess) < 0)
+	gs_error("Could not create gs pipe thread");
+    }
     waitpid(pid, &status, 0);
   }
 }
@@ -242,7 +247,7 @@ static int icmp_ping(const struct sockaddr_in *addr)
 	gs_error("Can't create ICMP socket: permission denied. Set net.ipv4.ping_group_range correctly.");
       else
 	gs_error("Can't create ICMP socket: errno %d", errno);
-      return -1;
+      return 1000;
   }
   int flags = fcntl(sock, F_GETFL, IPPROTO_ICMP);
   fcntl(sock, F_SETFL, flags | O_NONBLOCK);
@@ -273,11 +278,11 @@ static int icmp_ping(const struct sockaddr_in *addr)
   if (i != cc) {
       perror("ICMP sendto");
       close(sock);
-      return -1;
+      return 1000;
   }
 
   /* read the reply */
-  int ping = -1;
+  int ping = 1000;
   while (1) {
     time_t now = get_time_ms();
     if (now - t0 >= 1000)
@@ -317,7 +322,7 @@ static int icmp_ping(const struct sockaddr_in *addr)
     }
   }
   close(sock);
-  return ping;
+  return ping > 1000 ? 1000 : ping;
 }
 
 void *keepalive_server_handler(void *data)
@@ -363,8 +368,7 @@ void *keepalive_server_handler(void *data)
         continue;
       for (int j = 0; j < ping_count; j++) {
 	if (!memcmp(&ping_addresses[j], &player->addr, sizeof(struct sockaddr_in))) {
-	    int ping = ping_values[j];
-	    player->ping = (uint8_t)(ping == -1 ? 10 : ping / 100);
+	    player->ping = (uint8_t)(ping_values[j] / 100);
 	    char msg[128];
 	    uint16_t pkt_size = create_updateplayerping(&msg[6], player->username, player->in_session_id, player->ping);
 	    pkt_size = create_gs_hdr(msg, UPDATEPLAYERPING, 0x24, pkt_size);
@@ -844,13 +848,16 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       if (pos + 4 > buf_len) {
 	gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
 	print_gs_data(buf, (long unsigned int)buf_len);
-	  return 0;
+	return 0;
       }
       binLen = char_to_uint32(&buf[pos]);
       if ((uint32_t)(pos + 4) + binLen > buf_len) {
-	gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
-	print_gs_data(buf, (long unsigned int)buf_len);
-	  return 0;
+	if (s->server_type != SDO_SERVER || recv_flag != LEAVESESSION) {
+	  // SDO sends a bogus LEAVESESSION message when quitting a race. Ignore it silently.
+	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
+	  print_gs_data(buf, (long unsigned int)buf_len);
+	}
+	return 0;
       }
       memcpy(&byte_array[nr_b_parsed], &buf[pos+4], binLen);
       nr_b_parsed++;
@@ -898,10 +905,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
 
     /* calculate our ping now so we don't lock the entire server */
     if (pl->ping == 10)
-    {
-      int ping = icmp_ping(&pl->addr);
-      pl->ping = (uint8_t)(ping == -1 ? 10 : ping / 100);
-    }
+      pl->ping = (uint8_t)(icmp_ping(&pl->addr) / 100);
 
     groupid = byte_array[0];
     pthread_mutex_lock(&s->mutex);

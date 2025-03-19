@@ -540,7 +540,7 @@ int load_fivescorebefore_record(sqlite3 *db, const char* username, char* msg, ui
   return (index);
 }
 
-int load_player_blob(sqlite3 *db, const char* username, const char *blobname, uint8_t *data, int *size)
+int load_player_blob(sqlite3 *db, const char* username, const char *blobname, uint8_t *data, unsigned *size)
 {
   char zSql[128];
   sprintf(zSql, "SELECT %s from PLAYER_DATA WHERE USERNAME = trim(?)", blobname);
@@ -571,9 +571,9 @@ int load_player_blob(sqlite3 *db, const char* username, const char *blobname, ui
   } else if (rc == SQLITE_ROW) {
     int len = sqlite3_column_bytes(pStmt, 0);
     if (len > *size)
-      len = *size;
+      len = (int)*size;
     else
-      *size = len;
+      *size = (unsigned)len;
     memcpy(data, sqlite3_column_blob(pStmt, 0), (size_t)len);
     count = 1;
   } else {
@@ -586,7 +586,7 @@ int load_player_blob(sqlite3 *db, const char* username, const char *blobname, ui
   return count;
 }
 
-int load_player_data(sqlite3 *db, const char* username, uint8_t *data, int *size) {
+int load_player_data(sqlite3 *db, const char* username, uint8_t *data, unsigned *size) {
   return load_player_blob(db, username, "PLAYERDATA", data, size);
 }
 
@@ -748,7 +748,7 @@ int update_player_fullstats(sqlite3 *db, const char* username, const uint8_t *da
   return update_player_blob(db, username, "FULLSTATS", data, size);
 }
 
-int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, int *size)
+int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data, unsigned *size)
 {
   const char *zSql = "SELECT CARDATA from PLAYER_CAR "
       "INNER JOIN PLAYER_DATA ON PLAYER_DATA.ID = PLAYER_CAR.PLAYER_ID "
@@ -788,9 +788,9 @@ int load_player_car(sqlite3 *db, const char* username, int carnum, uint8_t *data
   } else if (rc == SQLITE_ROW) {
     int len = sqlite3_column_bytes(pStmt, 0);
     if (len > *size)
-      len = *size;
+      len = (int)*size;
     else
-      *size = len;
+      *size = (unsigned)len;
     memcpy(data, sqlite3_column_blob(pStmt, 0), (size_t)len);
     count = 1;
   } else {
@@ -1468,7 +1468,7 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
     int score = sqlite3_column_int(pStmt, 1);
     memcpy(p, &score, 4);
     p += 4;
-    *zone_count += 1;
+    *zone_count = (char)(*zone_count + 1);
     ranks[nranks++] = sqlite3_column_int(pStmt, 2);
   }
   sqlite3_finalize(pStmt);
@@ -1537,7 +1537,7 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
 	int score = sqlite3_column_int(pStmt, 1);
 	memcpy(p, &score, 4);
 	p += 4;
-	*zone_count += 1;
+	*zone_count = (char)(*zone_count + 1);
 	ranks[nranks++] = sqlite3_column_int(pStmt, 2);
       }
       sqlite3_finalize(pStmt);
@@ -1584,7 +1584,7 @@ int load_hall_of_fame(sqlite3 *db, char *username, int type, int class, char *bu
 	int score = sqlite3_column_int(pStmt, 1);
 	memcpy(p, &score, 4);
 	p += 4;
-	*zone_count += 1;
+	*zone_count = (char)(*zone_count + 1);
 	ranks[nranks++] = sqlite3_column_int(pStmt, 2);
       }
       sqlite3_finalize(pStmt);

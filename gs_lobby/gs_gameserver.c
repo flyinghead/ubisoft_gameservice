@@ -48,9 +48,9 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
   switch(send_flag) {
   case SENDTOOTHERPLAYERS:
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i] && (s->p_l[i]->player_id != player_id))
-	write(s->p_l[i]->sock, msg, pkt_size);
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      if (s->players[i] && s->players[i]->player_id != player_id)
+	write(s->players[i]->sock, msg, pkt_size);
     }
     pthread_mutex_unlock(&s->mutex);
     break;;
@@ -67,9 +67,9 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
     uint16_to_char(pkt_size, &msg[1]);
         
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i] && (s->p_l[i]->player_id == player_id)) {
-	write(s->p_l[i]->sock, msg, pkt_size);
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      if (s->players[i] && s->players[i]->player_id == player_id) {
+	write(s->players[i]->sock, msg, pkt_size);
     break;
       }
     }
@@ -77,9 +77,9 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
     break;;
   case SENDTOALLPLAYERS:
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      if (s->p_l[i])
-	write(s->p_l[i]->sock, msg, pkt_size);
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      if (s->players[i])
+	write(s->players[i]->sock, msg, pkt_size);
     }
     pthread_mutex_unlock(&s->mutex);
     break;;
@@ -113,8 +113,8 @@ void send_udp_player(player_t *player, char* msg, uint16_t pkt_size)
 {
   uint32_t last_ack_seq = serverSeq;
   uint32_t last_rel_ack_seq = serverSeq;
-  for (int i = 0; i < player->server->max_players; i++) {
-      player_t *pl = player->server->p_l[i];
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+      player_t *pl = player->server->players[i];
       if (pl == NULL || pl->player_id == player->player_id)
 	continue;
       if (pl->udp.last_ack_seq < last_ack_seq)
@@ -151,8 +151,8 @@ void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data
   switch(send_flag) {
   case SENDTOOTHERPLAYERS:
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      player_t *player = s->p_l[i];
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      player_t *player = s->players[i];
       if (player && player->player_id != player_id)
         send_udp_player(player, msg, pkt_size);
     }
@@ -171,8 +171,8 @@ void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data
     uint16_to_char(pkt_size, &msg[1]);
         
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      player_t *player = s->p_l[i];
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      player_t *player = s->players[i];
       if (player && player->player_id == player_id) {
         send_udp_player(player, msg, pkt_size);
 	break;
@@ -182,8 +182,8 @@ void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data
     break;;
   case SENDTOALLPLAYERS:
     pthread_mutex_lock(&s->mutex);
-    for(i = 0; i < s->max_players; i++) {
-      player_t *player = s->p_l[i];
+    for(i = 0; i < MAX_PLAYERS; i++) {
+      player_t *player = s->players[i];
       if (player)
 	send_udp_player(player, msg, pkt_size);
     }
@@ -306,14 +306,440 @@ uint16_t create_event_newmaster(char* msg, uint16_t playerid) {
   return (uint16_t)pkt_size;
 }
 
-int add_gameserver_player(server_data_t *s, player_t *pl) {
-  int i;
-  uint16_t max_players = s->max_players;
+/* Values marked with ! are known, others are guesses */
+static int Radars[384] = {
+    /* Aspen Winter */
+    /* class A */
+/* forward   reverse */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Aspen Summer */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Louisiana */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Louisiana Tornado */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Canada Autumn */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Canada Winter */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Canada Heavy Winter */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Hollywood */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Hollywood Disaster */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0, /* 63!*/	0,
+    0,		0,
+    /* Mexico */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* Montreal Summer */
+    /* class A */
+    117,	0,
+    96,		0,
+    109,	0,
+    /* class B */
+    107,	0,
+    88,		0,
+    100,	0,
+    /* class C */
+    98,	/*!*/	0,
+    80,	/*!*/	0,
+    91,	/*!*/	0,
+    /* class D */
+    92,		0,
+    75,		0,
+    85,		0,
+    /* Montreal Winter */
+    /* class A */
+    117,	0,
+    96,		0,
+    109,	0,
+    /* class B */
+    107,	0,
+    88,		0,
+    100,	0,
+    /* class C */
+    98,		0,
+    80,		0,
+    91,		0,
+    /* class D */
+    92,		0,
+    75,		0,
+    85,		0,
+    /* Montreal Ice Storm */
+    /* class A */
+    117,	0,
+    96,		0,
+    109,	0,
+    /* class B */
+    107,	0,
+    88,		0,
+    100,	0,
+    /* class C */
+    98,		0,
+    80,		0,
+    91,		0,
+    /* class D */
+    92,		0,
+    75,		0,
+    85,		0,
+    /* Nevada */
+    /* class A */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class B */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class C */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* class D */
+    0,		0,
+    0,		0,
+    0,		0,
+    /* New York Summer */
+    /* class A */
+    104,	0,
+    127,	0,
+    113,	0,
+    /* class B */
+    95, /*!*/	0,
+    116, /*!*/	0,
+    103,	0,
+    /* class C */
+    87,		0,
+    106,	0,
+    94,		0,
+    /* class D */
+    81,		0,
+    99,		0,
+    88,		0,
+    /* New York Winter */
+    /* class A */
+    104,	0,
+    127,	0,
+    113,	0,
+    /* class B */
+    95,		0,
+    116,	0,
+    103,	0,
+    /* class C */
+    87,		0,
+    106,	0,
+    94,		0,
+    /* class D */
+    81,		0,
+    99,		0,
+    88, /*!*/	0,
+};
 
+uint16_t create_reply_game_defines(char *msg, server_data_t *server)
+{
+  // loop 4: loop 5 ints -> gameDefines[4-23] (ranking bonuses)
+  // int -> gameDef[0]
+  // int ->         1
+  // int/100 ->     2
+  // int/100 ->     3
+  // 6 * int ->   24-29
+  // int/100 ->    30
+  // int/100 ->    31
+  // int/100 ->    32
+  // 4 * int ->    33-36
+  // 4 * int ->    37-40
+  // 4 * int ->    41-44
+  // 4 * int ->    45-48
+  // 4 * int ->    49-52
+  // 16 * 4 * 3 * 2 int -> circuits
+  //   16 circuits: aspen1, aspen2, atkey1, atkey2, canada1, canada2, canada3, holly1, holly2,
+  //                mexico, montreal1, montreal2, montreal3, nevada, newyork1, newyork2
+  //   4 car classes (A to D)
+  //   3 radars
+  //   2 limits (forward, reverse)
+  int data[437] = {};
+  // Ranking bonuses
+  // class D
+  data[0] = 10080;	// #1
+  data[1] = 6000;	// #2
+  data[2] = 3000;	// #3
+  data[3] = 1500;	// #4
+  data[4] = 600;	// #5
+  // class C
+  data[5] = 15120;	// #1
+  data[6] = 9000;	// #2
+  data[7] = 4500;	// #3
+  data[8] = 2250;	// #4
+  data[9] = 900;	// #5
+  // class B
+  data[10] = 25200;	// #1
+  data[11] = 15000;	// #2
+  data[12] = 7500;	// #3
+  data[13] = 3750;	// #4
+  data[14] = 1500;	// #5
+  // class A
+  data[15] = 50400;	// #1
+  data[16] = 30000;	// #2
+  data[17] = 15000;	// #3
+  data[18] = 7500;	// #4
+  data[19] = 3000;	// #5
+
+  data[20] = 6661;	// TODO ? -> game_def[0] ???
+  data[21] = 5000;	// Paint job price
+  data[22] = 100;	// TODO % (?) -> game_def[2]
+  data[23] = 100;	// TODO % (?) -> game_def[3]
+  data[24] = 6662;	// TODO ? -> game_def[24] cash initial value?
+  data[25] = 6663;	// TODO ? -> game_def[25] driving points initial value?
+
+  data[26] = 100000;	// class C points (!)
+  data[27] = 800000;	// class B points (!)
+  data[28] = 4000000;	// class A points
+
+  data[29] = 6664;	// TODO ? -> game_def[29]
+  data[30] = 100;	// TODO % ? -> game_def[30]
+  data[31] = 100;	// % repair cost multiplier
+  data[32] = 100;	// % cash -> driver points (!)
+
+  data[33] = 500;	// race bonus 1 (per class)
+  data[34] = 1000;
+  data[35] = 2000;
+  data[36] = 4000;
+  data[37] = 500;	// race bonus 2 (per class)
+  data[38] = 1000;
+  data[39] = 2000;
+  data[40] = 4000;
+  data[41] = 500;	// race bonus 3 (per class)
+  data[42] = 1000;
+  data[43] = 2000;
+  data[44] = 4000;
+
+  data[45] = 500;	// radar busted premiums (per class) (!)
+  data[46] = 1000;	// !
+  data[47] = 2000;	// !
+  data[48] = 4000;
+  data[49] = 10;	// radar busted bonus per mph (per class)
+  data[50] = 25;	// !
+  data[51] = 50;	// !
+  data[52] = 100;
+  load_game_defines(server->db, data, sizeof(data) / sizeof(data[0]));
+  memcpy(&data[53], Radars, sizeof(Radars));
+  memcpy(msg, data, sizeof(data));
+
+  return sizeof(data);
+}
+
+uint16_t create_reply_playerdata(char *msg, player_t *player)
+{
+  // 6 ints(le)			-> offset 0
+  //   0: driver points
+  //   1: user cash
+  //   5: seasons played
+  // 16 bytes
+  // 1 byte: tires bitmap
+  // 10 * 101 bytes		-> offset 0x200, garage
+  //  byte 0: ff=empty,else=car_type
+  //       1: car color?
+  //     int: ?
+  //    byte: ?
+  // 3 bytes: ?
+  //    byte: ?
+  // byte 11: ?
+  // offset 12: 5 * 3 ints
+  //    byte: ?
+  // 4 bytes: ?
+  //    byte:
+  //    byte:
+  //     int:
+  //   short:
+  //    byte:
+
+  // Fetch from database
+  unsigned size = MAX_PKT_SIZE - 8;
+  if (load_player_data(player->server->db, player->username, (uint8_t *)msg, &size) != 1 || size == 0)
+  {
+    // Create a new user
+    size = 0;
+    for (int i = 0; i < 10; i++) {
+      *(int *)&msg[size] = i == 1 ? load_initial_cash(player->server->db) : 0;
+      size += 4;
+    }
+    msg[size++] = 1; // basic tires
+    // garage
+    for (int i = 0; i < 10; i++) {
+      memset(&msg[size], 0, 101);
+      msg[size] = (char)0xff;	// empty slot
+      size += 101;
+    }
+  }
+  else
+  {
+    for (int i = 0; i < 10; i++)
+    {
+      unsigned car_size = MAX_PKT_SIZE - 8 - size;
+      load_player_car(player->server->db, player->username, i, (uint8_t *)&msg[size], &car_size);
+      if (car_size != 101) {
+	msg[size] = (char)0xff;
+	car_size = 101;
+      }
+      size += car_size;
+    }
+  }
+  return (uint16_t)size;
+}
+
+int add_gameserver_player(server_data_t *s, player_t *pl) {
   pthread_mutex_lock(&s->mutex);
-  for(i=0;i<max_players;i++) {
-    if(!(s->p_l[i])) {
-      s->p_l[i] = pl;
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (s->players[i] == NULL) {
+      s->players[i] = pl;
       gs_info("GAMESERVER%d - Added player with sock: %d", s->game_tcp_port, pl->sock);
       pthread_mutex_unlock(&s->mutex);
       return 1;
@@ -327,7 +753,6 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
 
 void remove_gameserver_player(player_t *pl, char* msg) {
   server_data_t *s = pl->server;
-  int max_players = s->max_players;
   int i;
 
   if (pl->player_id != 0) {
@@ -340,8 +765,8 @@ void remove_gameserver_player(player_t *pl, char* msg) {
     /* If master left, change to the next in list */
     if(pl->is_master == 1) {
       s->master_id = 0;
-      for(i=0;i<max_players;i++) {
-	player_t *new_master = s->p_l[i];
+      for (i = 0; i < MAX_PLAYERS; i++) {
+	player_t *new_master = s->players[i];
 	if (new_master && new_master->player_id != pl->player_id && new_master->player_id != 0) {
 	  s->master_id = new_master->player_id;
 	  s->master[0] = '\0';
@@ -358,10 +783,10 @@ void remove_gameserver_player(player_t *pl, char* msg) {
     }
 
     /* Find and remove user */
-    for(i=0;i<max_players;i++) {
-      if (s->p_l[i] && s->p_l[i]->player_id == pl->player_id) {
+    for (i = 0; i < MAX_PLAYERS; i++) {
+      if (s->players[i] && s->players[i]->player_id == pl->player_id) {
 	gs_info("GAMESERVER%d - Removed player with 0x%02x", s->game_tcp_port, pl->player_id);
-	s->p_l[i] = NULL;
+	s->players[i] = NULL;
 	s->current_nr_of_players = (uint8_t)(s->current_nr_of_players - 1);
       }
     }
@@ -369,9 +794,9 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   else {
     /* Player hasn't registered and is unknown */
     pthread_mutex_lock(&s->mutex);
-    for (i = 0; i < max_players; i++) {
-      if (s->p_l[i] == pl) {
-	s->p_l[i] = NULL;
+    for (i = 0; i < MAX_PLAYERS; i++) {
+      if (s->players[i] == pl) {
+	s->players[i] = NULL;
 	break;
       }
     }
@@ -405,15 +830,9 @@ void remove_gameserver_player(player_t *pl, char* msg) {
  *
  */
 player_t* get_user_from_addr(server_data_t *s, struct sockaddr_in *addr) {
-  int i=0;
-  int max_clients = s->max_players;
-
-  for(i=0;i<max_clients;i++) {
-    if (s->p_l[i] != NULL) {
-      if (s->p_l[i]->addr.sin_addr.s_addr == addr->sin_addr.s_addr) {
-	return s->p_l[i];
-      }
-    }
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    if (s->players[i] != NULL && s->players[i]->addr.sin_addr.s_addr == addr->sin_addr.s_addr)
+      return s->players[i];
   }
   return NULL;
 }
@@ -435,9 +854,11 @@ int parse_gameserver_header(char *buf, int buf_len) {
 
 void lobby_kick_player(server_data_t *server, uint16_t player_id)
 {
+  if (server->lobby_pipe == -1)
+    return;
   player_t *player = NULL;
-  for(int i = 0; i < server->max_players; i++) {
-    player = server->p_l[i];
+  for (int i = 0; i < MAX_PLAYERS; i++) {
+    player = server->players[i];
     if (player && player->player_id == player_id)
       break;
     player = NULL;
@@ -446,7 +867,7 @@ void lobby_kick_player(server_data_t *server, uint16_t player_id)
     return;
   char msg[MAX_UNAME_LEN + 2];
   msg[0] = 'K';
-  msg[1] = (char)strlen(player->username) + 1;
+  msg[1] = (char)(strlen(player->username) + 1);
   strncpy(&msg[2], player->username, MAX_UNAME_LEN);
   write(server->lobby_pipe, msg, (size_t)(msg[1] + 2));
 }
@@ -493,8 +914,8 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
       pthread_mutex_lock(&s->mutex);
       /* enforce username unicity */
-      for (int i = 0; i < s->max_players; i++) {
-	  player_t *player = s->p_l[i];
+      for (int i = 0; i < MAX_PLAYERS; i++) {
+	  player_t *player = s->players[i];
 	  if (player == NULL || strcmp(player->username, &buf[8]) != 0)
 	    continue;
 	  gs_info("GAMESERVER%d - Kicking duplicate user %s", s->game_tcp_port, player->username);
@@ -510,10 +931,10 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       }
       else {
         pl->player_id = 1;
-        for (int i = 0; i < s->max_players; i++)
-  	      if (s->p_l[i] && s->p_l[i]->player_id >= pl->player_id)
-  	        pl->player_id = s->p_l[i]->player_id;
-  	    pl->player_id += 1;
+        for (int i = 0; i < MAX_PLAYERS; i++)
+  	      if (s->players[i] && s->players[i]->player_id >= pl->player_id)
+  	        pl->player_id = s->players[i]->player_id;
+  	    pl->player_id = (uint16_t)(pl->player_id + 1);
       }
       gs_info("GAMESERVER%d - Player %s got id: %d%s", s->game_tcp_port, pl->username,
 	      pl->player_id, pl->is_master ? " (Master)" : "");
@@ -525,10 +946,10 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_OWNID, SENDTOALLPLAYERS, pkt_size);
       write(pl->sock, msg, pkt_size);
       /* Send player list */
-      for(int i = 0; i < s->max_players; i++) {
-	  if (s->p_l[i] && s->p_l[i]->player_id != pl->player_id) {
+      for(int i = 0; i < MAX_PLAYERS; i++) {
+	  if (s->players[i] && s->players[i]->player_id != pl->player_id) {
 	      memset(msg, 0, MAX_PKT_SIZE);
-	      pkt_size = create_event_newplayer(&msg[8], s->p_l[i]->player_id, s->p_l[i]->username);
+	      pkt_size = create_event_newplayer(&msg[8], s->players[i]->player_id, s->players[i]->username);
 	      pkt_size = create_gameserver_hdr(msg, (uint8_t)EVENT_NEWPLAYER, SENDTOALLPLAYERS, pkt_size);
 	      write(pl->sock, msg, pkt_size);
 	  }
@@ -689,9 +1110,9 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     /*
      * SDO Garage stuff
      */
-    case GROUPDATA:
-      gs_info("Got GROUPDATA");
-      print_gs_data(buf, (long unsigned int)buf_len);
+    case 0x94:
+    case 0x95:
+      // Unknown SDO messages, probably related to database access
       return 0;
 
     case SDO_VERSION_CHECK:
@@ -753,195 +1174,15 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     case SDO_GAME_DEFINES:
       gs_info("Got GAME_DEFINES");
       print_gs_data(buf, (long unsigned int)buf_len);
-      // loop 4: loop 5 ints -> gameDefines[4-23]
-      // int -> gameDef[0]
-      // int ->         1
-      // int/100 ->     2
-      // int/100 ->     3
-      // 5 * int ->   24-29
-      // int/100 ->    30
-      // int/100 ->    31
-      // int/100 ->    32
-      // 4 * int ->    33-36
-      // 4 * int ->    37-40
-      // 4 * int ->    41-44
-      // 4 * int ->    45-48
-      // 4 * int ->    49-52
-      // 16 * 4 * 3 * 2 int -> circuits
-      //   16 circuits: aspen1, aspen2, atkey1, atkey2, canada1, canada2, canada3, holly1, holly2,
-      //                mexico, montreal1, montreal2, montreal3, nevada, newyork1, newyork2
-      //   4 car classes (A to D)
-      //   3 radars
-      //   2 limits (forward, reverse)
-      {
-	int data[436] = {};
-	// Ranking bonuses
-	// class D
-	data[0] = 10080;	// #1
-	data[1] = 6000;		// #2
-	data[2] = 3000;		// #3
-	data[3] = 1500;		// #4
-	data[4] = 600;		// #5
-	// class C
-	data[5] = 15120;	// #1
-	data[6] = 9000;		// #2
-	data[7] = 4500;		// #3
-	data[8] = 2250;		// #4
-	data[9] = 900;		// #5
-	// class B
-	data[10] = 25200;	// #1
-	data[11] = 15000;	// #2
-	data[12] = 7500;	// #3
-	data[13] = 3750;	// #4
-	data[14] = 1500;	// #5
-	// class A
-	data[15] = 50400;	// #1
-	data[16] = 30000;	// #2
-	data[17] = 15000;	// #3
-	data[18] = 7500;	// #4
-	data[19] = 3000;	// #5
-
-	data[20] = 6661;	// TODO ?
-	data[21] = 5000;	// Paint job price
-	data[22] = 100;		// TODO % (?)
-	data[23] = 100;		// TODO % (?)
-	data[24] = 6662;	// TODO ?
-	data[25] = 6663;	// TODO ?
-
-	data[26] = 160000;	// class C points
-	data[27] = 800000;	// class B points
-	data[28] = 4000000;	// class A points
-
-	data[29] = 6664;	// TODO ?
-	data[30] = 100;		// TODO % ?
-	data[31] = 100;		// % repair cost multiplier
-	data[32] = 100;		// % cash -> driver points
-
-	data[33] = 500;		// race bonus 1 (per class)
-	data[34] = 1000;
-	data[35] = 2000;
-	data[36] = 4000;
-	data[37] = 500;		// race bonus 2 (per class)
-	data[38] = 1000;
-	data[39] = 2000;
-	data[40] = 4000;
-	data[41] = 500;		// race bonus 3 (per class)
-	data[42] = 1000;
-	data[43] = 2000;
-	data[44] = 4000;
-
-	data[45] = 500;		// radar busted premiums (per class)
-	data[46] = 1000;
-	data[47] = 2000;
-	data[48] = 4000;
-	data[49] = 10;		// radar busted bonus per mph (per class)
-	data[50] = 25;
-	data[51] = 50;
-	data[52] = 100;
-	load_game_defines(s->db, data, sizeof(data) / sizeof(data[0]));
-	// montreal1 (forward)
-	size_t idx = 53 + 10 * 4 * 3 * 2;
-	// class A
-	data[idx] = 117; idx += 2;
-	data[idx] = 96; idx += 2;
-	data[idx] = 109; idx += 2;
-	// class B
-	data[idx] = 107; idx += 2;
-	data[idx] = 88; idx += 2;
-	data[idx] = 100; idx += 2;
-	// class C
-	data[idx] = 98; idx += 2; // actual value
-	data[idx] = 80; idx += 2; // actual value
-	data[idx] = 91; idx += 2; // actual value
-	// class D
-	data[idx] = 92; idx += 2;
-	data[idx] = 75; idx += 2;
-	data[idx] = 85; idx += 2;
-	// (reverse on odd indexes)
-	// newyork1 (forward)
-	idx = 53 + 14 * 4 * 3 * 2;
-	// class A
-	data[idx] = 104; idx += 2;
-	data[idx] = 127; idx += 2;
-	data[idx] = 115; idx += 2; // unknown
-	// class B
-	data[idx] = 95; idx += 2; // actual value
-	data[idx] = 116; idx += 2; // actual value
-	data[idx] = 105; idx += 2; // unknown
-	// class C
-	data[idx] = 87; idx += 2;
-	data[idx] = 106; idx += 2;
-	data[idx] = 96; idx += 2; // unknown
-	// class D
-	data[idx] = 81; idx += 2;
-	data[idx] = 99; idx += 2;
-	data[idx] = 90; idx += 2; // unknown
-	memcpy(&msg[8], data, sizeof(data));
-	pkt_size = sizeof(data);
-      }
+      pkt_size = create_reply_game_defines(&msg[8], s);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_GAME_DEFINES, SENDTOPLAYER, pkt_size);
       break;
 
     case SDO_DBINFO_PLAYERDATA:
       gs_info("Got DBINFO_PLAYERDATA");
       print_gs_data(buf, (long unsigned int)buf_len);
-      // 6 ints(le)			-> offset 0
-      //   0: driver points
-      //   1: user cash
-      //   5: seasons played
-      // 16 bytes
-      // 1 byte: tires bitmap
-      // 10 * 101 bytes		-> offset 0x200, garage
-      //  byte 0: ff=empty,else=car_type
-      //       1: car color?
-      //     int: ?
-      //    byte: ?
-      // 3 bytes: ?
-      //    byte: ?
-      // byte 11: ?
-      // offset 12: 5 * 3 ints
-      //    byte: ?
-      // 4 bytes: ?
-      //    byte:
-      //    byte:
-      //     int:
-      //   short:
-      //    byte:
-      {
-        // Fetch from database
-        int size = MAX_PKT_SIZE - 8;
-        if (load_player_data(s->db, pl->username, (uint8_t *)&msg[8], &size) != 1 || size == 0)
-        {
-          // Create a new user
-          pkt_size = 0;
-          for (int i = 0; i < 10; i++) {
-            *(int *)&msg[8 + pkt_size] = i == 1 ? load_initial_cash(s->db) : 0;
-            pkt_size += 4;
-          }
-          msg[8 + pkt_size++] = 1; // basic tires
-          // garage
-          for (int i = 0; i < 10; i++) {
-            memset(&msg[8 + pkt_size], 0, 101);
-            msg[8 + pkt_size] = (char)0xff;	// empty slot
-            pkt_size += 101;
-          }
-        }
-        else
-        {
-          pkt_size = (uint16_t)size;
-          for (int i = 0; i < 10; i++)
-          {
-            size = MAX_PKT_SIZE - 8 - pkt_size;
-            load_player_car(s->db, pl->username, i, (uint8_t *)&msg[8 + pkt_size], &size);
-            if (size != 101) {
-              msg[8 + pkt_size] = (char)0xff;
-              size = 101;
-            }
-            pkt_size = (uint16_t)(pkt_size + size);
-          }
-        }
-        pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_PLAYERDATA, SENDTOPLAYER, pkt_size);
-      }
+      pkt_size = create_reply_playerdata(&msg[8], pl);
+      pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_PLAYERDATA, SENDTOPLAYER, pkt_size);
       break;
 
     case SDO_DBUPDATE_PLAYERSTAT:
@@ -1091,11 +1332,11 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       {
 	uint16_t kicked_id = char_to_uint16(&buf[8]);
 	pthread_mutex_lock(&s->mutex);
-	for (int i = 0; i < s->max_players; i++) {
-	    if (s->p_l[i] && s->p_l[i]->player_id == kicked_id) {
+	for (int i = 0; i < MAX_PLAYERS; i++) {
+	    if (s->players[i] && s->players[i]->player_id == kicked_id) {
 		pkt_size = (uint16_t)uint32_to_char(1, &msg[8]);
 		pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_PLAYER_KICK, SENDTOPLAYER, pkt_size);
-		write(s->p_l[i]->sock, msg, pkt_size);
+		write(s->players[i]->sock, msg, pkt_size);
 		pkt_size = 0;
 		break;
 	    }
@@ -1269,7 +1510,7 @@ static uint16_t create_gameserver_udp_segment(char* msg, uint8_t msg_id, uint8_t
   msg[1] = (char)(0x10 | msg_flag);
   msg[3] = (char)msg_id;
 
-  return msg_size + 4;
+  return (uint16_t)(msg_size + 4);
 }
 
 /*
@@ -1344,7 +1585,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    if (new_connection) {
 		gs_info("Got UDPCONNECT");
 		pl->udp.ready = 1;
-		pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0);
+		pkt_size = (uint16_t)(pkt_size + create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)EVENT_UDPCONNECT, SENDTOALLPLAYERS, 0));
 
 		char tmsg[MAX_PKT_SIZE];
 		uint16_t tpkt_size = create_event_newmaster(&tmsg[8], (uint16_t)s->master_id);
@@ -1361,7 +1602,7 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
 	    {
 	      uint32_t rate = char_to_uint32(p - 4);
 	      gs_info("Got EVENT_RATE[%d] rate %d", pl->player_id, rate);
-	      pkt_size += create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)SDO_DUMMY, SENDTOPLAYER, 0);
+	      pkt_size = (uint16_t)(pkt_size + create_gameserver_udp_segment(&msg[pkt_size], (uint8_t)SDO_DUMMY, SENDTOPLAYER, 0));
 	    }
 	    break;
 
@@ -1395,9 +1636,9 @@ int udp_msg_handler(char* buf, int buf_len, server_data_t *s, struct sockaddr_in
   if (send_to_players)
       send_udp_functions(send_to_players, buf, (uint16_t)buf_len, s, pl->player_id);
   /* Handle timeouts */
-  for (int i = 0; i < (int)s->max_players; i++)
+  for (int i = 0; i < MAX_PLAYERS; i++)
   {
-    player_t *player = s->p_l[i];
+    player_t *player = s->players[i];
     if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 30000) {
       gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
       /* Notify lobby to remove player from session */
@@ -1641,7 +1882,7 @@ int main (int argc, char *argv[]) {
     }
   }
   
-  if (port == 0 || nr == 0 || server_type == 0 || server_data.lobby_pipe == -1) {
+  if (port == 0 || nr == 0 || server_type == 0 || (server_data.lobby_pipe == -1 && server_type == SDO_SERVER)) {
     gs_info("GAMESERVER - Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master> -t <SERVER_TYPE> -i <pipefd>");
     return 0;
   }
@@ -1673,7 +1914,6 @@ int main (int argc, char *argv[]) {
 
   /* Populate server data struct */
   server_data.max_players = nr;
-  server_data.p_l = calloc((size_t)nr, sizeof(player_t *));
   server_data.game_tcp_port = port;
   server_data.game_udp_port = (uint16_t)(port + 2);
   server_data.current_nr_of_players = 0;

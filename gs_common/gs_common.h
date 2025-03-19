@@ -10,6 +10,7 @@
 
 #define MAX_PKT_SIZE 2000
 #define MAX_UNAME_LEN 17
+#define MAX_PLAYERS 6
 
 #define POD_SERVER 1
 #define MONACO_SERVER 2
