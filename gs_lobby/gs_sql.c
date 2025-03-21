@@ -633,6 +633,50 @@ int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int 
     *(int *)&data[428] = sqlite3_column_int(pStmt, 6);	// trial cash won
     *(int *)&data[432] = sqlite3_column_int(pStmt, 7);	// vendetta races
     *(int *)&data[436] = sqlite3_column_int(pStmt, 8);	// vendetta wins
+    sqlite3_finalize(pStmt);
+    // Favorite track mode
+    rc = sqlite3_prepare_v2(db, "SELECT RACE_MODE, SUM(RACE_COUNT) AS total_count "
+	"FROM TRACK_RECORD "
+	"WHERE USERNAME = trim(?) "
+	"GROUP BY RACE_MODE "
+	"ORDER BY total_count DESC "
+	"LIMIT 1", -1, &pStmt, 0);
+    if (rc != SQLITE_OK ) {
+      sql_error(db, "Favorite track mode prepare SQL error");
+    }
+    else {
+      rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+      if (rc != SQLITE_OK)
+	sql_error(db, "Bind username failed");
+      rc = sqlite3_step(pStmt);
+      if (rc == SQLITE_ROW) {
+	int track = sqlite3_column_int(pStmt, 0);
+	memcpy(&data[465], &track, sizeof(int));	// favorite track mode
+	*size = 465 + sizeof(int);
+      }
+    }
+    sqlite3_finalize(pStmt);
+    // Favorite track
+    rc = sqlite3_prepare_v2(db, "SELECT TRACK, SUM(RACE_COUNT) AS total_count "
+	"FROM TRACK_RECORD "
+	"WHERE USERNAME = trim(?) "
+	"GROUP BY TRACK "
+	"ORDER BY total_count DESC "
+	"LIMIT 1", -1, &pStmt, 0);
+    if (rc != SQLITE_OK ) {
+      sql_error(db, "Favorite track prepare SQL error");
+    }
+    else {
+      rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
+      if (rc != SQLITE_OK)
+	sql_error(db, "Bind username failed");
+      rc = sqlite3_step(pStmt);
+      if (rc == SQLITE_ROW) {
+	int track = sqlite3_column_int(pStmt, 0);
+	memcpy(&data[469], &track, sizeof(int));	// favorite track
+	*size = 469 + sizeof(int);
+      }
+    }
     count = 1;
   } else {
     gs_info("Got SQL return %d from sqlite3_step..skip storing", rc);
@@ -1102,7 +1146,7 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
   int ret = -1;
   sqlite3_stmt *pStmt;
   if (sqlite3_prepare_v2(db,
-      "SELECT LAP_TIME, RACE_TIME, MAX_SPEED FROM TRACK_RECORD "
+      "SELECT LAP_TIME, RACE_TIME, MAX_SPEED, RACE_COUNT FROM TRACK_RECORD "
       "WHERE USERNAME = trim(?) AND TRACK = ? AND RACE_MODE = ?", -1, &pStmt, 0) != SQLITE_OK) {
       sql_error(db, "Prepare SQL error");
       return -1;
@@ -1128,7 +1172,7 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
     // No track record for this user
     sqlite3_finalize(pStmt);
     if (sqlite3_prepare_v2(db, "INSERT INTO TRACK_RECORD "
-	"(USERNAME, TRACK, RACE_MODE, LAP_TIME, RACE_TIME, MAX_SPEED) VALUES (?, ?, ?, ?, ?, ?)", -1, &pStmt, 0) != SQLITE_OK) {
+	"(USERNAME, TRACK, RACE_MODE, LAP_TIME, RACE_TIME, MAX_SPEED, RACE_COUNT) VALUES (?, ?, ?, ?, ?, ?, 1)", -1, &pStmt, 0) != SQLITE_OK) {
       gs_error("Prepare SQL INSERT error");
     }
     rc = sqlite3_bind_text(pStmt, 1, username, (int)strlen(username), SQLITE_STATIC);
@@ -1173,6 +1217,7 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
     int best_laptime = sqlite3_column_int(pStmt, 0);
     int best_racetime = sqlite3_column_int(pStmt, 1);
     int best_speed = sqlite3_column_int(pStmt, 2);
+    int count = sqlite3_column_int(pStmt, 3);
     int records = 0;
     if (lap_time != -1 && (best_laptime == -1 || lap_time < best_laptime))
       records |= 1;
@@ -1180,60 +1225,60 @@ int update_track_record(sqlite3 *db, char *username, int track, int mode, int la
       records |= 2;
     if (max_speed > best_speed)
       records |= 4;
-    if (records != 0)
-    {
-      sqlite3_finalize(pStmt);
-      if (sqlite3_prepare_v2(db,
-	  "UPDATE TRACK_RECORD SET LAP_TIME = ?, RACE_TIME = ?, MAX_SPEED = ? "
-	  "WHERE USERNAME = trim(?) AND TRACK = ? AND RACE_MODE = ?", -1, &pStmt, 0) != SQLITE_OK) {
-        gs_error("Prepare SQL UPDATE error");
-      }
-      rc = sqlite3_bind_int(pStmt, 1, (records & 1) ? lap_time : best_laptime);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind int1 failed");
-	  goto exit;
-      }
-      rc = sqlite3_bind_int(pStmt, 2, (records & 2) ? race_time : best_racetime);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind int2 failed");
-	  goto exit;
-      }
-      rc = sqlite3_bind_int(pStmt, 3, (records & 4) ? max_speed : best_speed);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind int3 failed");
-	  goto exit;
-      }
-      rc = sqlite3_bind_text(pStmt, 4, username, (int)strlen(username), SQLITE_STATIC);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind text failed");
-	  goto exit;
-      }
-      rc = sqlite3_bind_int(pStmt, 5, track);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind int4 failed");
-	  goto exit;
-      }
-      rc = sqlite3_bind_int(pStmt, 6, mode);
-      if (rc != SQLITE_OK) {
-	  sql_error(db, "Bind int5 failed");
-	  goto exit;
-      }
-      rc = sqlite3_step(pStmt);
-      if (rc != SQLITE_DONE) {
-	  sql_error(db, "UPDATE failed");
-	  goto exit;
-      }
-      if (best_laptime == -1)
-	records &= ~1;
-      if (best_racetime == -1)
-	records &= ~2;
-      if (best_speed == -1)
-	records &= ~4;
-      ret = records;
+
+    sqlite3_finalize(pStmt);
+    if (sqlite3_prepare_v2(db,
+	"UPDATE TRACK_RECORD SET LAP_TIME = ?, RACE_TIME = ?, MAX_SPEED = ?, RACE_COUNT = ? "
+	"WHERE USERNAME = trim(?) AND TRACK = ? AND RACE_MODE = ?", -1, &pStmt, 0) != SQLITE_OK) {
+      gs_error("Prepare SQL UPDATE error");
     }
-    else {
-      ret = 0;
+    rc = sqlite3_bind_int(pStmt, 1, (records & 1) ? lap_time : best_laptime);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int1 failed");
+	goto exit;
     }
+    rc = sqlite3_bind_int(pStmt, 2, (records & 2) ? race_time : best_racetime);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int2 failed");
+	goto exit;
+    }
+    rc = sqlite3_bind_int(pStmt, 3, (records & 4) ? max_speed : best_speed);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int3 failed");
+	goto exit;
+    }
+    rc = sqlite3_bind_int(pStmt, 4, count + 1);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int4 failed");
+	goto exit;
+    }
+    rc = sqlite3_bind_text(pStmt, 5, username, (int)strlen(username), SQLITE_STATIC);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind text failed");
+	goto exit;
+    }
+    rc = sqlite3_bind_int(pStmt, 6, track);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int5 failed");
+	goto exit;
+    }
+    rc = sqlite3_bind_int(pStmt, 7, mode);
+    if (rc != SQLITE_OK) {
+	sql_error(db, "Bind int6 failed");
+	goto exit;
+    }
+    rc = sqlite3_step(pStmt);
+    if (rc != SQLITE_DONE) {
+	sql_error(db, "UPDATE failed");
+	goto exit;
+    }
+    if (best_laptime == -1)
+      records &= ~1;
+    if (best_racetime == -1)
+      records &= ~2;
+    if (best_speed == -1)
+      records &= ~4;
+    ret = records;
   }
   int wr_laptime = load_best_lap(db, track, mode);
   if (wr_laptime != -1 && wr_laptime == lap_time)
