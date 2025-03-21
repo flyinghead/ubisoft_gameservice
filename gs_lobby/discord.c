@@ -19,6 +19,7 @@ typedef struct Notif Notif;
 
 static char webhook_url[256];
 static int serverType;
+static int threadCount;
 
 void set_discord_params(int server_type, const char *url) {
   serverType = server_type;
@@ -61,6 +62,18 @@ static void freeNotif(Notif *notif)
   free(notif);
 }
 
+static void delThread() {
+  __atomic_fetch_sub(&threadCount, 1, __ATOMIC_SEQ_CST);
+}
+static int addThread() {
+  int ret = 1;
+  if (__atomic_fetch_add(&threadCount, 1, __ATOMIC_SEQ_CST) >= 5) {
+      delThread();
+      ret = 0;
+  }
+  return ret;
+}
+
 static void *postWebhookThread(void *arg)
 {
   Notif *notif = (Notif *)arg;
@@ -68,6 +81,7 @@ static void *postWebhookThread(void *arg)
   if (curl == NULL) {
       gs_error("discord: Can't create curl handle");
       freeNotif(notif);
+      delThread();
       return NULL;
   }
   CURLcode res;
@@ -127,6 +141,7 @@ static void *postWebhookThread(void *arg)
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   freeNotif(notif);
+  delThread();
   return NULL;
 }
 
@@ -136,22 +151,21 @@ static void postWebhook(Notif *notif)
       freeNotif(notif);
       return;
   }
+  if (!addThread()) {
+      freeNotif(notif);
+      gs_error("discord: Max thread count reached");
+      return;
+  }
+
   pthread_attr_t threadAttr;
-  if (pthread_attr_init(&threadAttr)) {
-      gs_error("discord: pthread_attr_init() error");
-      freeNotif(notif);
-      return;
-  }
-  if (pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
-      gs_error("discord: pthread_attr_setdetachstate() error");
-      freeNotif(notif);
-      return;
-  }
   pthread_t thread;
-  if (pthread_create(&thread, &threadAttr, postWebhookThread, notif)) {
-      gs_error("discord: pthread_create() error");
+  if (pthread_attr_init(&threadAttr)
+      || pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)
+      || pthread_create(&thread, &threadAttr, postWebhookThread, notif))
+  {
+      gs_error("discord: can't create thread");
+      delThread();
       freeNotif(notif);
-      return;
   }
 }
 

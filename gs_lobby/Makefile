@@ -20,8 +20,8 @@ all: $(TARGET)
 gs_lobby: gs_waitmodule.o gs_lobby.o $(COMMON_OBJS)
 	$(CC) $(CFLAGS) gs_waitmodule.o gs_lobby.o $(COMMON_OBJS) -o $@ $(LFLAGS)
 
-gs_gameserver: gs_gameserver.o $(COMMON_OBJS)
-	$(CC) $(CFLAGS) gs_gameserver.o $(COMMON_OBJS) -o $@ $(LFLAGS)
+gs_gameserver: gs_gameserver.o udp_pod.o udp_sdo.o $(COMMON_OBJS)
+	$(CC) $(CFLAGS) gs_gameserver.o udp_pod.o udp_sdo.o $(COMMON_OBJS) -o $@ $(LFLAGS)
 
 clean:
 	rm -f *.o $(TARGET)

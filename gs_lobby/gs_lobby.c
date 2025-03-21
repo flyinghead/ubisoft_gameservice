@@ -1063,7 +1063,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     if (!add_server_session(s,
 			    sess,
 			    pl,
-			    tok_array[0], /* pl->username */
+			    s->server_type == SDO_SERVER ? tok_array[0] : pl->username,
 			    tok_array[1],
 			    tok_array[2],
 			    tok_array[3],
