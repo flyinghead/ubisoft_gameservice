@@ -1091,7 +1091,11 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     pkt_size = create_gs_hdr(msg, SESSIONNEW, 0x24, pkt_size);
     send_msg_to_lobby(s, msg, pkt_size);
     pthread_mutex_unlock(&s->mutex);
-      
+#ifdef DISCORD
+    if (s->server_type != SDO_SERVER)
+      discord_game_created(pl->username, sess->session_name, sess->session_gameinfo);
+#endif
+
     pkt_size = 0;
     break;;
   case LEAVESESSION:
@@ -1184,7 +1188,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       send_msg_to_session(sess, msg, pkt_size);
 
 #ifdef DISCORD
-      if (s->server_type != SDO_SERVER || strcmp(sess->session_game, "SDODC_GARAGE") != 0)
+      if (s->server_type == SDO_SERVER && strcmp(sess->session_game, "SDODC_GARAGE") != 0)
 	discord_game_created(pl->username, sess->session_name, sess->session_gameinfo);
 #endif
     } else {

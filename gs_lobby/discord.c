@@ -193,7 +193,106 @@ void discord_user_joined(const char *player, const char **lobby_players, int cou
   postWebhook(notif);
 }
 
-void discord_game_created(const char *player, const char *game, const char *game_info)
+static void pod_game_created(const char *player, const char *game, const char *game_info)
+{
+  // game info:
+  // b0: weapons
+  // b1: power ups
+  // b2: collisions
+  // b4,5: 1 single race, 2 championship, 3 thriller race
+  // 1f for Classification
+  uint8_t type = (uint8_t)game_info[0];
+  if (type == 0x1f)
+    // Classification
+    return;
+  Notif *notif = (Notif *)calloc(1, sizeof(Notif));
+  asprintf(&notif->content, "Player **%s** created a game", player);
+
+  const char *raceType;
+  switch (type >> 4)
+  {
+    case 1:
+    default:
+      raceType = "Single Race";
+      break;
+    case 2:
+      raceType = "Championship";
+      break;
+    case 3:
+      raceType = "Thriller Race";
+      break;
+  }
+  notif->embedTitle = strdup(raceType);
+  asprintf(&notif->embedText, "collisions: %s\npower-ups: %s\nweapons: %s",
+		  type & 4 ? "Yes" : "No",
+		  type & 2 ? "Yes" : "No",
+		  type & 1 ? "Yes" : "No");
+  postWebhook(notif);
+}
+
+static void monaco_game_created(const char *player, const char *game, const char *game_info)
+{
+  static const char *track_names[] = {
+      "Australia",
+      "Brazil",
+      "Argentina",
+      "San Marino",
+      "Monaco",
+      "Spain",
+      "Canada",
+      "France",
+      "Great Britain",
+      "Germany",
+      "Hungary",
+      "Belgium",
+      "Italy",
+      "Austria",
+      "Luxembourg",
+      "Japan",
+      "Andalucia,"
+  };
+  if (!strcmp(game_info, "D"))
+    // Classification
+    return;
+  // game info:
+  // single race: "SASUC00"
+  // [1] game type (Arcade, Simulation)
+  // [2] laps (Short, Long)
+  // [4] collisions ('C': collisions, 'W': no collisions)
+  // [5,6] track#
+  // championship:
+  //   "CAC" Championship Arcade
+  //   "CSC" Championship Simulation
+  Notif *notif = (Notif *)calloc(1, sizeof(Notif));
+  asprintf(&notif->content, "Player **%s** created a game", player);
+
+  if (game_info[0] == 'C') {
+      // Championship
+      if (game_info[1] == 'A')
+	notif->embedTitle = strdup("Championship Arcade");
+      else
+	notif->embedTitle = strdup("Championship Simulation");
+      notif->embedText = strdup("");
+  }
+  else
+  {
+      // Single race
+      int track_num = (game_info[5] - '0') * 10 + (game_info[6] - '0');
+      const char *track_name;
+      if (track_num < 0 || track_num >= sizeof(track_names) / sizeof(track_names[0]))
+        track_name = "?";
+      else
+        track_name = track_names[track_num];
+
+      notif->embedTitle = strdup(game_info[1] == 'A' ? "Arcade Race" : "Simulation Race");
+      asprintf(&notif->embedText, "track: %s\ncollisions: %s\nlaps: %s",
+    		  track_name, game_info[4] == 'C' ? "Yes" : "No",
+    		  game_info[2] == 'S' ? "Short" : "Long");
+  }
+  postWebhook(notif);
+}
+
+static void sdo_game_created(const char *player, const char *game, const char *game_info)
 {
   static const char *track_names[] = {
       "Aspen Winter",
@@ -258,4 +357,21 @@ void discord_game_created(const char *player, const char *game, const char *game
 		  track_name, weather_name, time_name, laps,
 		  reverse ? "\nReverse" : "", mirror ? "\nMirror" : "");
   postWebhook(notif);
+}
+
+
+void discord_game_created(const char *player, const char *game, const char *game_info)
+{
+  switch (serverType)
+  {
+    case POD_SERVER:
+      pod_game_created(player, game, game_info);
+      break;
+    case MONACO_SERVER:
+      monaco_game_created(player, game, game_info);
+      break;
+    case SDO_SERVER:
+      sdo_game_created(player, game, game_info);
+      break;
+  }
 }
