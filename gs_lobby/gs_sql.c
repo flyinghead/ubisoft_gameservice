@@ -633,6 +633,9 @@ int load_player_fullstats(sqlite3 *db, const char* username, uint8_t *data, int 
     *(int *)&data[428] = sqlite3_column_int(pStmt, 6);	// trial cash won
     *(int *)&data[432] = sqlite3_column_int(pStmt, 7);	// vendetta races
     *(int *)&data[436] = sqlite3_column_int(pStmt, 8);	// vendetta wins
+    rc = -1;
+    memcpy(&data[465], &rc, sizeof(int));	// favorite track mode
+    memcpy(&data[469], &rc, sizeof(int));	// favorite track
     sqlite3_finalize(pStmt);
     // Favorite track mode
     rc = sqlite3_prepare_v2(db, "SELECT RACE_MODE, SUM(RACE_COUNT) AS total_count "

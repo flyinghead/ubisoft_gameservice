@@ -362,7 +362,7 @@ ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	shutdown(other->sock, SHUT_RDWR);
 
       strlcpy(pl->username, username, sizeof(pl->username));
-      gs_info("User %s is joining the waitmodule", pl->username);
+      gs_info("User %s is joining the waitmodule [%s]", pl->username, get_player_ip(pl));
       print_gs_data(buf, (unsigned)buf_len);
 
       /* Load player record, create if not exists */
