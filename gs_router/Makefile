@@ -12,4 +12,4 @@ gs_router: $(DEP)
 	$(CC) $(CFLAGS) $(SRC) -o $@ $(LFLAGS)
 
 clean:
-	rm $(TARGET)
+	rm -f $(TARGET)

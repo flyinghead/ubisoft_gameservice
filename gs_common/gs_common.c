@@ -103,6 +103,7 @@ void print_gs_data(void* pkt,unsigned long pkt_size) {
   for (j = 0; j < off; j++) if (buffer[j] < 0x20) buffer[j] = '.';
   for (j = 0; j < 16 - off; j++) printf("   ");
   printf("| %s\n",buffer);
+  fflush(stdout);
 }
 
 uint8_t * gs_decode_data(uint8_t * data, size_t size) {

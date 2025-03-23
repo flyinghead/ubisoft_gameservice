@@ -1,0 +1,15 @@
+[Unit]
+Description=Ubisoft router server
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=dcnet
+WorkingDirectory=/usr/local/ubisoft
+ExecStart=/usr/local/ubisoft/gs_router -c cfg/gs.cfg
+
+[Install]
+WantedBy=multi-user.target

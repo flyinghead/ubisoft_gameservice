@@ -386,7 +386,7 @@ int main(int argc , char *argv[]) {
   
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
     if (client_sock < 0) {
-      gs_info("Accept failed (Socket: %d)");
+      gs_info("Accept failed");
       sleep(1);
     } else {
       player_t *pl = (player_t *)malloc(sizeof(player_t));
@@ -419,46 +419,38 @@ void *gs_router_client_handler(void *data)
   memset(s_msg, 0, sizeof(s_msg));
 
   struct timeval tv;
-  tv.tv_sec = 1800;       /* Timeout in seconds */
+  tv.tv_sec = 30;       /* Timeout in seconds */
   tv.tv_usec = 0;
   setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,(char *)&tv,sizeof(struct timeval));
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv,sizeof(struct timeval));
   
   //Receive a message from client
-  while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
-    gs_decode_data((uint8_t*)(c_msg+6), (size_t)(read_size-6));
+  while ((read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0) {
+    if (read_size >= 6) {
+      gs_decode_data((uint8_t *)(c_msg + 6), (size_t)(read_size - 6));
 
-    //Parse msg
-    write_size = (size_t)msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
-    if (write_size > 0) {
-      send_gs_msg(sock, s_msg, (uint16_t)write_size);
+      //Parse msg
+      write_size = msg_handler(sock, pl, s_msg, c_msg, (int)read_size);
+      if (write_size > 0)
+        send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
-    if (write_size <= 0) {
+    else {
+      write_size = 0;
+    }
+    if (write_size == 0) {
       gs_error("[ROUTER] - Client with socket %d is not following protocol - Disconnecting", sock);
-      close(sock);
-      if (pl) {
-	free(pl);
-	pl = NULL;
-      }
-      return 0;
+      break;
     }
     memset(s_msg, 0, sizeof(s_msg));
     memset(c_msg, 0, sizeof(c_msg));
-    fflush(stdout);
   }
 
-  if( (inet_ntop(AF_INET, &(pl->addr.sin_addr), ip, INET_ADDRSTRLEN)) != NULL ) {
+  if ((inet_ntop(AF_INET, &(pl->addr.sin_addr), ip, INET_ADDRSTRLEN)) != NULL)
     gs_info("[ROUTER] - Client with socket %d [%s] disconnected", sock, ip);
-  } else {
+  else
     gs_info("[ROUTER] - Could not resolve IP for %d", sock);
-  }
-  
   close(sock);
-  fflush(stdout);
+  free(pl);
 
-  if (pl) {
-    free(pl);
-    pl = NULL;
-  }
   return 0;
 } 
