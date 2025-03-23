@@ -1,6 +1,6 @@
 CC = gcc
 TARGET = gs_router
-CFLAGS = -Wconversion -Wall
+CFLAGS = -Wconversion -Wall -O3
 LFLAGS = -lpthread -lsqlite3 -lm
 SRC = gs_http.c gs_router.c gs_sql.c ../gs_common/gs_common.c ../gs_common/gs_msg.c
 

@@ -3,12 +3,12 @@
 #include <netinet/in.h>
 
 #define ROUTER_TCP_PORT 40000
-#define HTTP_PORT 80
 
 typedef struct {
   uint16_t gs_wm_sdo_port;
   uint16_t gs_wm_pod_port;
   uint16_t gs_wm_monaco_port;
+  uint16_t http_port;
  
   char gs_wm_pod_ip[INET_ADDRSTRLEN];
   char gs_wm_sdo_ip[INET_ADDRSTRLEN];

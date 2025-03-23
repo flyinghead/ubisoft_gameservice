@@ -66,10 +66,11 @@ uint32_t read_config_file(char *f_name, char *msg) {
     return 0;
   }
 
-  fread(msg, fileLen, 1, file);
+  if (fread(msg, fileLen, 1, file) != 1)
+    gs_error("Read error on config file");
   fclose(file);
 
-  return (fileLen-1);
+  return fileLen;
 }
 
 /*
@@ -139,24 +140,18 @@ void *gs_http_client_handler(void *data) {
   memset(s_msg, 0, sizeof(s_msg));
 
   struct timeval tv;
-  tv.tv_sec = 1800;       /* Timeout in seconds */
+  tv.tv_sec = 30;       /* Timeout in seconds */
   tv.tv_usec = 0;
   setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,(char *)&tv,sizeof(struct timeval));
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv,sizeof(struct timeval));
   
   //Receive a message from client
-  while( (read_size = recv(sock , c_msg , sizeof(c_msg) , 0)) > 0 ) {
+  if ((read_size = recv(sock, c_msg, sizeof(c_msg) - 1, 0)) > 0) {
     write_size = (ssize_t)http_msg_handler(s_msg, c_msg, (int)read_size);
     if (write_size > 0) {
-      write(sock, s_msg, write_size);
-      break;
+      ssize_t ret = write(sock, s_msg, write_size);
+      (void)ret;
     }
-    if (write_size <= 0) {
-      break;
-    }
-    memset(s_msg, 0, sizeof(s_msg));
-    memset(c_msg, 0, sizeof(c_msg));
-    fflush(stdout);
   }
   
   shutdown(sock, SHUT_RDWR);
@@ -193,10 +188,10 @@ void *gs_http_server_handler(void *data) {
   
   server.sin_family = AF_INET;
   server.sin_addr.s_addr = INADDR_ANY;
-  server.sin_port = htons( HTTP_PORT );
+  server.sin_port = htons(s_data->http_port);
   
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
-    gs_error("Bind failed on port %d. Error", HTTP_PORT);
+    gs_error("Bind failed on port %d. Error", s_data->http_port);
     return 0;
   }
   gs_info("HTTP TCP listener on port: %d", ntohs(server.sin_port));

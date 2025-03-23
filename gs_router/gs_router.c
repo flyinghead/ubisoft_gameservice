@@ -63,7 +63,7 @@ void handler(int s) {
 int get_gs_config(server_data_t *s, char *fn) {
   gs_info("Reading config...");
   FILE *file = fopen(fn,"r");
-  int monaco_port=0, sdo_port=0, pod_port=0;
+  int monaco_port=0, sdo_port=0, pod_port=0, http_port = 80;
   char sdo_ip[16], monaco_ip[16], pod_ip[16], buf[1024], db_path[256], config_path[256];
 
   memset(buf, 0, sizeof(buf));
@@ -83,6 +83,7 @@ int get_gs_config(server_data_t *s, char *fn) {
       sscanf(buf, "GS_SDO_WAITMODULE_IP=%15s", sdo_ip);
       sscanf(buf, "GS_DB_PATH=%s", db_path);
       sscanf(buf, "GS_CONFIG_PATH=%s", config_path);
+      sscanf(buf, "HTTP_PORT=%d", &http_port);
     }
     fclose(file);
   } else {
@@ -134,6 +135,7 @@ int get_gs_config(server_data_t *s, char *fn) {
   s->gs_wm_sdo_port = (uint16_t)sdo_port;
   s->gs_wm_monaco_port = (uint16_t)monaco_port;
   s->gs_wm_pod_port = (uint16_t)pod_port;
+  s->http_port = (uint16_t)http_port;
     
   gs_info("Loaded Config:");
   gs_info("\tGS_POD_WAITMODULE_PORT: %d", s->gs_wm_pod_port);
@@ -145,6 +147,7 @@ int get_gs_config(server_data_t *s, char *fn) {
   
   gs_info("\tGS_DB_PATH: %s", s->gs_db_path);
   gs_info("\tGS_CONFIG_PATH: %s", s->gs_config_path);
+  gs_info("\tHTTP_PORT: %d", s->http_port);
   
   return 1;
 }

@@ -14,11 +14,6 @@ install: all
 	install -o $(USER) -g $(USER) gs_router/gs_router $(INSTALL_DIR)
 	install -o $(USER) -g $(USER) gs_lobby/gs_lobby gs_lobby/gs_gameserver $(INSTALL_DIR)
 
-installwebsite:
-	cp gameloft.site /etc/nginx/sites-availables/gameloft
-	ln -s /etc/nginx/sites-available/gameloft /etc/nginx/sites-enabled
-	systemctl restart nginx
-
 installservice:
 	cd systemd ; make installservice
 
