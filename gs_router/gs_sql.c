@@ -208,7 +208,7 @@ int update_player_lastlogin (sqlite3* db, const char* username) {
   }
   
   sqlite3_finalize(pStmt);
-  gs_info("Updated lastlogin for for %s", username);
+  gs_info("Updated lastlogin for %s", username);
 
   return 1;
 }

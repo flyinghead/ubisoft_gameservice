@@ -169,8 +169,11 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
     uint8_t msg_id = (uint8_t)(p[3] & 0xff);
     int send_flag = p[1] & 0xf;
     p += size;
-    if (p - buf > buf_len)
+    if (p - buf > buf_len) {
+      send_to_players = -1;
+      gs_info("GAMESERVER%d - UDP segment overflow from %s: size %d", s->game_tcp_port, pl->username, size);
       break;
+    }
 
     if (send_flag == SENDTOSERVER)
     {
@@ -208,8 +211,25 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
 	    print_gs_data(buf, buf_len);
 	    break;
 	}
-    } else {
-	send_to_players = send_flag;
+    }
+    else if (send_to_players != -1)
+    {
+	if (send_flag != SENDTOOTHERPLAYERS && send_flag != SENDTOALLPLAYERS) {
+	  send_to_players = -1;
+	  gs_info("GAMESERVER%d - Bogus UDP packet ignored from %s: send_flag %x", s->game_tcp_port, pl->username, send_flag);
+	}
+	/* a bit risky
+	else if (msg_id != EVENT_ACK && msg_id != EVENT_CHOKE
+	    && msg_id != EVENT_RATE && msg_id != EVENT_UDPCONNECT
+	    && msg_id != SDO_PLAYER_STATE && msg_id != SDO_GAME_EVENT
+	    && msg_id != SDO_DUMMY && msg_id != STILLALIVE) {
+	  send_to_players = -1;
+	  gs_info("GAMESERVER%d - Bogus UDP packet ignored from %s: msg_id %x", pl->username, msg_id);
+	}
+	*/
+	else {
+	  send_to_players = send_flag;
+	}
     }
   }
   if (pkt_size > 10) {
@@ -227,7 +247,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
 	     (socklen_t)sizeof(struct sockaddr_in));
   }
   /* Broadcast packets to players */
-  if (send_to_players) {
+  if (send_to_players > 0) {
       uint32_t reliable = (buf[0] & 0x80) << 16;
       uint24_to_char(serverSeq | reliable, &buf[0]);
       serverSeq++;

@@ -13,6 +13,7 @@ install: all
 	install -o $(USER) -g $(USER) -d $(INSTALL_DIR)
 	install -o $(USER) -g $(USER) gs_router/gs_router $(INSTALL_DIR)
 	install -o $(USER) -g $(USER) gs_lobby/gs_lobby gs_lobby/gs_gameserver $(INSTALL_DIR)
+	install -o $(USER) -g $(USER) -d /var/log/ubisoft
 
 installservice:
 	cd systemd ; make installservice

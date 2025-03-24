@@ -10,6 +10,7 @@ RestartSec=1
 User=dcnet
 WorkingDirectory=/usr/local/ubisoft
 ExecStart=/usr/local/ubisoft/gs_lobby -c %i.cfg
+StandardOutput=append:/var/log/ubisoft/%i.log
 
 [Install]
 WantedBy=multi-user.target

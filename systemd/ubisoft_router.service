@@ -10,6 +10,7 @@ RestartSec=1
 User=dcnet
 WorkingDirectory=/usr/local/ubisoft
 ExecStart=/usr/local/ubisoft/gs_router -c cfg/gs.cfg
+StandardOutput=append:/var/log/ubisoft/router.log
 
 [Install]
 WantedBy=multi-user.target

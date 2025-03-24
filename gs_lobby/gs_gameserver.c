@@ -562,7 +562,7 @@ uint16_t create_reply_game_defines(char *msg, server_data_t *server)
 
   data[29] = 6664;	// TODO ? -> game_def[29]
   data[30] = 100;	// TODO % ? -> game_def[30]
-  data[31] = 100;	// % repair cost multiplier
+  data[31] = 100;	// % upgrades repair price
   data[32] = 100;	// % cash -> driver points (!)
 
   data[33] = 500;	// race bonus 1 (per class)
