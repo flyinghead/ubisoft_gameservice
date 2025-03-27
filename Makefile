@@ -8,6 +8,7 @@ all:
 clean:
 	cd gs_router ; make clean
 	cd gs_lobby ; make clean
+	rm -f gs_common/*.o
 
 install: all
 	install -o $(USER) -g $(USER) -d $(INSTALL_DIR)

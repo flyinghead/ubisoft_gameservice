@@ -259,9 +259,14 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   {
     player_t *player = s->players[i];
     if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 30000) {
-      gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
-      /* Notify lobby to remove player from session */
-      lobby_kick_player(s, player->player_id);
+      if (player->player_id != 0) {
+	gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
+	/* Notify lobby to remove player from session */
+	lobby_kick_player(s, player->player_id);
+      }
+      else {
+	gs_info("GAMESERVER%d - Socket %d timed out", s->game_tcp_port, player->sock);
+      }
       /* Close the client connection */
       shutdown(player->sock, SHUT_RDWR);
     }

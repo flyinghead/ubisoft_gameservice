@@ -732,10 +732,8 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   if (s->current_nr_of_players == 0 || s->master_id == 0) {
     gs_info("GAMESERVER%d - Server is empty...exit", s->game_tcp_port);
 
-    if (sqlite3_close(s->db) != SQLITE_OK) {
-      gs_info("DB is busy during closing");
-    }
-    gs_info("GAMESERVER%d - Closed the DB", s->game_tcp_port);
+    if (sqlite3_close(s->db) != SQLITE_OK)
+      gs_error("DB is busy during closing");
     pthread_mutex_unlock(&s->mutex);
     exit(0);
   }
@@ -912,7 +910,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;;
 
     case EVENT_PLAYERINFOS:
-      gs_info("Got EVENT_PLAYERINFOS: no-op???");
       break;;
       
     case EVENT_TOPSCORES:
@@ -1105,7 +1102,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_DBUPDATE_PLAYERSTAT:
-      gs_info("Got DBUPDATE_PLAYERSTAT");
       update_player_data(s->db, pl->username, (const uint8_t *)&buf[8], 41);
       pkt_size = 0;
       break;
@@ -1122,11 +1118,9 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	int size = MAX_PKT_SIZE - 10;
 	load_player_fullstats(s->db, pl->username, (uint8_t *)&msg[10], &size);
 	if (size != 0) {
-	  size = 473;	// Should be 473 bytes
+	  size = 468;	// Should be 468 bytes
 	  size += 2;
 	  /*
-	  *(int *)&msg[410] = 11;
-	  *(int *)&msg[414] = 12;
 	  *(int *)&msg[418] = 13;	// std races
 	  *(int *)&msg[422] = 14;	// 1st place victories
 	  *(int *)&msg[426] = 16;	// trial races
@@ -1135,24 +1129,23 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	  *(int *)&msg[438] = 18;	// cash won in trial
 	  *(int *)&msg[442] = 19;	// vendetta races -> vendetta avg = cars won / races
 	  *(int *)&msg[446] = 20;	// cars won
-	  *(int *)&msg[450] = 6;
-	  *(int *)&msg[454] = 7;
-	  *(int *)&msg[458] = 8;
-	  *(int *)&msg[462] = 9;
-	  */
-	  *(int *)&msg[466] = 190;	// std avg multiplier?
-	  /*
-//	  *(int *)&msg[470] = 26;	// 5 bytes? ff ff ff ff ff
+	  *(int *)&msg[466] = std_races * 5;	// std avg multiplier?
 	  *(int *)&msg[475] = 0;	// favorite track mode
 	  *(int *)&msg[479] = 7;	// favorite track
 	  */
+	  memmove(&msg[475], &msg[470], 8);
+	  // these 5 bytes are never updated
+	  msg[470] = 0;
+	  msg[471] = 0;
+	  msg[472] = 0;
+	  msg[473] = 0;
+	  msg[474] = 0;
+	  size += 5;
 	}
 	pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_DBINFO_FULLSTATS, SENDTOPLAYER, (uint16_t)size);
       }
       break;
     case SDO_DBUPDATE_FULLSTATS:
-      gs_info("Got DBUPDATE_FULLSTATS");
-      print_gs_data(buf, (long unsigned int)buf_len);
       update_player_fullstats(s->db, pl->username, (const uint8_t *)&buf[8], buf_len - 8);
       pkt_size = 0;
       break;
@@ -1165,8 +1158,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_UPDATE_SESSION_INFO:
-      gs_info("Got SDO_UPDATE_SESSION_INFO");
-      print_gs_data(buf, (long unsigned int)buf_len);
       // 0000 | 00 00 2D 40 04 03 00 8D 00 00 00 00 00 00 00 00 | ..-@............
       // 0010 | 05 00 00 00 00 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0
       //   or   05 8C FE nn nn 30 20 30 20 30 20 30 20 30 20 30 | .....0 0 0 0 0 0  with nnnn increasing
@@ -1195,6 +1186,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     	  gs_error("SDO_UPDATE_SESSION_INFO: overflow: %d bytes", len);
     	}
     	else {
+    	  gs_info("SDO_UPDATE_SESSION_INFO: %s", s->session_info);
     	  msg[1] = (char)len;
     	  memcpy(&msg[2], &buf[idx], len);
     	  ssize_t ret = write(s->lobby_pipe, msg, len + 2);
@@ -1276,7 +1268,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 
     case SDO_TRACKRECORDS_UPDATE:
       {
-	gs_info("Got SDO_TRACKRECORDS_UPDATE");
 	// 0000 | 00 00 1C 40 04 03 00 C7 04 00 00 00 00 00 00 00 | ...@............
 	//                                track#      mode
 	// 0010 | 00 00 00 00 00 00 00 00 73 E1 2D 00             | ........s.-.
@@ -1309,7 +1300,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_TRACKRECORDS:
-      gs_info("Got SDO_TRACKRECORDS");
       // holly reverse/mirror:
       // 0000 | 00 00 0E 40 04 01 00 C8 00 00 00 00 07 03
 
@@ -1338,7 +1328,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     case SDO_STATS_TRIALWIN:
     case SDO_STATS_VENDETTAAVG:	// %: 990 is 0.099%
     case SDO_STATS_VENDETTAWIN:
-      gs_info("Got SDO_STATS_xxx %02x", recv_flag);
       // 4 groups? * u8 count (< 10) * char name[16] + u32 driverPoints
       // groups: top 10, 5 players before, current player, 5 players after
       // count[0] ints
@@ -1356,7 +1345,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       // 0000 | 00 00 14 40 04 01 00 89 02 00 00 00 01 00 00 00 | ...@............
       // 0010 | 01 00 00 00             ?           race count  | ....
       //        wins
-      gs_info("Got SDO_DBUPDATE_STANDARD");
       update_std_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
       break;
 
@@ -1365,12 +1353,10 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       //                                            trial races
       // 0010 | 03 00 00 00 03 00 00 00 4E C3 00 00             | ........N...
       //        # trials    won trials  cash won ($49998)
-      gs_info("Got SDO_DBUPDATE_TRIAL");
       update_trial_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16], *(int *)&buf[20], *(int *)&buf[24]);
       break;
 
     case SDO_DBUPDATE_VENDETTA:
-      gs_info("Got SDO_DBUPDATE_VENDETTA");
       print_gs_data(buf, (unsigned)buf_len);
       update_vendetta_race(s->db, pl->username, *(int *)&buf[12], *(int *)&buf[16]);
       break;
@@ -1461,10 +1447,8 @@ void *gameserver_udp_server_handler(void *data) {
 
     if (ret == 0) {
       gs_info("GAMESERVER%d - No UDP activity...exit", s_data->game_tcp_port);
-      if (sqlite3_close(s_data->db) != SQLITE_OK) {
-	gs_info("DB is busy during closing");
-      }
-      gs_info("GAMESERVER%d - Closed the DB", s_data->game_tcp_port);
+      if (sqlite3_close(s_data->db) != SQLITE_OK)
+	gs_error("DB is busy during closing");
       close(socket_desc);
       exit(0);
     }
