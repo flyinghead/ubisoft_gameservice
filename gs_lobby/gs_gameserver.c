@@ -51,7 +51,7 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
     pthread_mutex_unlock(&s->mutex);
     break;;
   case SENDTOPLAYERGROUP:
-    gs_info("GAMESERVER%d - SENDTOPLAYERGROUP not in use", s->game_tcp_port);
+    gs_info("SENDTOPLAYERGROUP not in use");
     break;;
   case SENDTOPLAYER:
     if (pkt_size < 0xA)
@@ -80,7 +80,7 @@ void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data
     pthread_mutex_unlock(&s->mutex);
     break;;
   default:
-    gs_info("GAMESERVER%d - TCP Flag not supported %u", s->game_tcp_port, send_flag);
+    gs_info("TCP Flag not supported %u", send_flag);
     print_gs_data(msg, pkt_size);
   }
 }
@@ -99,7 +99,7 @@ void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data
     pthread_mutex_unlock(&s->mutex);
     break;;
   case SENDTOPLAYERGROUP:
-    gs_info("GAMESERVER%d - SENDTOPLAYERGROUP not in use", s->game_tcp_port);
+    gs_info("SENDTOPLAYERGROUP not in use");
     break;;
   case SENDTOPLAYER:
     if (pkt_size < 0x12)
@@ -130,7 +130,7 @@ void send_udp_functions(int send_flag, char* msg, uint16_t pkt_size, server_data
     pthread_mutex_unlock(&s->mutex);
     break;;
   default:
-    gs_info("GAMESERVER%d - UDP Flag not supported %x", s->game_tcp_port, send_flag);
+    gs_info("UDP Flag not supported %x", send_flag);
     print_gs_data(msg, pkt_size);
   }
 }
@@ -658,7 +658,7 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
     if (s->players[i] != NULL && s->players[i]->addr.sin_addr.s_addr == pl->addr.sin_addr.s_addr) {
       char ip[INET_ADDRSTRLEN];
       inet_ntop(AF_INET, &pl->addr.sin_addr, ip, sizeof(ip));
-      gs_error("GAMESERVER%d - %s already has IP %s", s->game_tcp_port, s->players[i]->username, ip);
+      gs_error("%s already has IP %s", s->players[i]->username, ip);
       pthread_mutex_unlock(&s->mutex);
       return 0;
     }
@@ -666,14 +666,13 @@ int add_gameserver_player(server_data_t *s, player_t *pl) {
   for (int i = 0; i < MAX_PLAYERS; i++) {
     if (s->players[i] == NULL) {
       s->players[i] = pl;
-      gs_info("GAMESERVER%d - Added player with sock: %d", s->game_tcp_port, pl->sock);
+      gs_info("Added player with sock: %d", pl->sock);
       pthread_mutex_unlock(&s->mutex);
       return 1;
     }
   }
   pthread_mutex_unlock(&s->mutex);
-  gs_info("GAMESERVER%d - Could not add player with sock: %d", s->game_tcp_port, pl->sock);
-  gs_info("GAMSERVER%d - Server full", s->game_tcp_port);
+  gs_info("Could not add player with sock %d: Server full", pl->sock);
   return 0; 
 }
 
@@ -705,13 +704,13 @@ void remove_gameserver_player(player_t *pl, char* msg) {
 	}
       }
       if (s->master_id == 0 && s->current_nr_of_players >= 2)
-	gs_info("GAMESERVER%d - Can't find a new master. Aborting", s->game_tcp_port);
+	gs_info("Can't find a new master. Aborting");
     }
 
     /* Find and remove user */
     for (i = 0; i < MAX_PLAYERS; i++) {
       if (s->players[i] && s->players[i]->player_id == pl->player_id) {
-	gs_info("GAMESERVER%d - Removed player with 0x%02x", s->game_tcp_port, pl->player_id);
+	gs_info("Removed player with %d", pl->player_id);
 	s->players[i] = NULL;
 	s->current_nr_of_players = (uint8_t)(s->current_nr_of_players - 1);
       }
@@ -729,7 +728,7 @@ void remove_gameserver_player(player_t *pl, char* msg) {
   }
   free(pl);
   if (s->current_nr_of_players == 0 || s->master_id == 0) {
-    gs_info("GAMESERVER%d - Server is empty...exit", s->game_tcp_port);
+    gs_info("Server is empty...exit");
 
     if (sqlite3_close(s->db) != SQLITE_OK)
       gs_error("DB is busy during closing");
@@ -828,7 +827,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     switch(recv_flag) {
     case EVENT_REGISTER:
       if (recv_size != 0x18) {
-        gs_info("GAMESERVER%d - EVENT_REGISTER should have the size 0x18", s->game_tcp_port);
+        gs_info("EVENT_REGISTER should have the size 0x18");
         return 0;
       }
       if (strlen(&buf[8]) >= MAX_UNAME_LEN)
@@ -842,12 +841,12 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
 	  player_t *player = s->players[i];
 	  if (player == NULL || strcmp(player->username, &buf[8]) != 0)
 	    continue;
-	  gs_info("GAMESERVER%d - Kicking duplicate user %s", s->game_tcp_port, player->username);
+	  gs_info("Kicking duplicate user %s", player->username);
 	  /* Close the client connection */
 	  shutdown(player->sock, SHUT_RDWR);
       }
       strlcpy(pl->username, &buf[8], sizeof(pl->username));
-      gs_info("GAMESERVER%d - User %s joined the Game Server", s->game_tcp_port, pl->username);
+      gs_info("User %s joined the Game Server", pl->username);
       if ((strcmp(pl->username, s->master)) == 0) {
         pl->is_master = 1;
         pl->player_id = 1;
@@ -860,7 +859,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
   	        pl->player_id = s->players[i]->player_id;
   	    pl->player_id = (uint16_t)(pl->player_id + 1);
       }
-      gs_info("GAMESERVER%d - Player %s got id: %d%s", s->game_tcp_port, pl->username,
+      gs_info("Player %s got id: %d%s", pl->username,
 	      pl->player_id, pl->is_master ? " (Master)" : "");
 
       /* New user added */
@@ -1150,7 +1149,6 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_REQUEST_MOTD:
-      print_gs_data(buf, (long unsigned int)buf_len);
       load_motd(s->db, &msg[8], MAX_PKT_SIZE - 8);
       pkt_size = (uint16_t)(strlen(&msg[8]) + 1);
       pkt_size = create_gameserver_hdr(msg, (uint8_t)SDO_REQUEST_MOTD, SENDTOPLAYER, pkt_size);
@@ -1365,7 +1363,7 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     default:
-      gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, recv_flag);
+      gs_info("Flag not supported %x", recv_flag);
       print_gs_data(buf, (long unsigned int)buf_len);
       return 0;
     }
@@ -1376,9 +1374,9 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       send_functions(send_flag, buf, (uint16_t)buf_len, s, ntohs(char_to_uint16(&buf[0x08])));
   } else {
     if (buf[7] == SDO_START_RACE)
-      gs_info("GAMESERVER%d - Race start", s->game_tcp_port);
+      gs_info("Race start");
     else if (buf[7] == SDO_START_TIME)
-      gs_info("GAMESERVER%d - %s to all(%d): Time start", s->game_tcp_port, pl->username, send_flag);
+      gs_info("%s to all: Time start", pl->username);
     send_functions(send_flag, buf, (uint16_t)buf_len, s, pl->player_id);
   }
 
@@ -1409,7 +1407,7 @@ void *gameserver_udp_server_handler(void *data) {
   
   socket_desc = socket(AF_INET, SOCK_DGRAM, 0);
   if (socket_desc == -1) {
-    gs_info("GAMESERVER%d - Could not create socket", s_data->game_tcp_port);
+    gs_info("Could not create UDP socket");
     return 0;
   }
   flags = fcntl(socket_desc, F_GETFL);
@@ -1424,7 +1422,7 @@ void *gameserver_udp_server_handler(void *data) {
   server.sin_port = htons( s_data->game_udp_port );
     
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
-    gs_error("GAMESERVER%d - UDP bind failed. Error", s_data->game_tcp_port);
+    gs_error("UDP bind failed. Error");
     return 0;
   }
 
@@ -1440,12 +1438,12 @@ void *gameserver_udp_server_handler(void *data) {
     tv.tv_sec = 120;
     ret = select(fdmax, &read_fds, NULL, NULL, &tv);
     if (ret == -1) {
-      gs_error("GAMSERVER%d  - Error in select", s_data->game_tcp_port);
+      gs_error("Error in select");
       break;
     }
 
     if (ret == 0) {
-      gs_info("GAMESERVER%d - No UDP activity...exit", s_data->game_tcp_port);
+      gs_info("No UDP activity...exit");
       if (sqlite3_close(s_data->db) != SQLITE_OK)
 	gs_error("DB is busy during closing");
       close(socket_desc);
@@ -1456,7 +1454,7 @@ void *gameserver_udp_server_handler(void *data) {
       read_size = recvfrom(socket_desc, c_msg, sizeof(c_msg), 0, (struct sockaddr *)&client, &slen);
       
       if (read_size < 0) {
-	gs_error("GAMESERVER%d - ERROR in recvfrom", s_data->game_tcp_port);
+	gs_error("ERROR in recvfrom");
 	break;
       }
       if (udp_dump != NULL)
@@ -1493,7 +1491,6 @@ void *gs_gameserver_client_handler(void *data) {
   int sock = pl->sock; 
   ssize_t read_size;
   char c_msg[MAX_PKT_SIZE], s_msg[MAX_PKT_SIZE];
-  server_data_t *s = pl->server;
 
   struct timeval tv;
   tv.tv_sec = 1500;       /* Timeout in seconds */
@@ -1515,7 +1512,7 @@ void *gs_gameserver_client_handler(void *data) {
 	  write(sock, s_msg, (size_t)write_size);
 	}
 	else if (write_size < 0) {
-	  gs_error("GAMESERVER%d - Client with socket %d is not following protocol - Disconnecting", s->game_tcp_port, sock);
+	  gs_error("Client with socket %d is not following protocol - Disconnecting", sock);
 	  close(sock);
 	  remove_gameserver_player(pl, s_msg);
 	  return 0;
@@ -1526,7 +1523,7 @@ void *gs_gameserver_client_handler(void *data) {
 	index += n_index;
       } else {
 	if (read_size == sizeof(c_msg)) {
-	    gs_error("GAMESERVER%d - Client with socket %d large packet - Disconnecting", s->game_tcp_port, sock);
+	    gs_error("Client with socket %d large packet - Disconnecting", sock);
 	    close(sock);
 	    remove_gameserver_player(pl, s_msg);
 	    return 0;
@@ -1549,13 +1546,13 @@ void *gs_gameserver_client_handler(void *data) {
 }
 
 static void signal_handler(int s) {
-  gs_info("GAMESERVER%d - Caught signal %d. Exiting", server_data.game_tcp_port, s);
+  gs_info("Caught signal %d. Exiting", s);
   exit(0);
 }
 
 static void delete_pidfile() {
   if (remove(server_data.pidfile) != 0)
-    gs_error("GAMESERVER%d - Could not remove %s", server_data.game_tcp_port, server_data.pidfile);
+    gs_error("Could not remove %s", server_data.pidfile);
 }
 
 static void close_udp_dump() {
@@ -1575,6 +1572,7 @@ int main (int argc, char *argv[]) {
     switch (opt) {
     case 'p':
       port = (uint16_t)str2int(optarg);
+      sprintf(log_tag, "gs%d", port);
       break;
     case 'n':
       nr = (uint8_t)str2int(optarg);
@@ -1614,17 +1612,17 @@ int main (int argc, char *argv[]) {
   }
   
   if (port == 0 || nr == 0 || server_type == 0 || (server_data.lobby_pipe == -1 && server_type == SDO_SERVER)) {
-    gs_info("GAMESERVER - Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master> -t <SERVER_TYPE> -i <pipefd>");
+    gs_info("Missing mandatory fields\n -p <port>\n -n <Number of players>\n -d<DB_PATH> -m<Username of Master> -t <SERVER_TYPE> -i <pipefd>");
     return 0;
   }
   if (master == NULL) {
-    gs_info("GAMESERVER - Missing Master username");
+    gs_info("Missing Master username");
     return 0;
   } else {
     strlcpy(server_data.master, master, sizeof(server_data.master));
   }
   if (db_path == NULL) {
-    gs_info("GAMESERVER - Missing DB PATH");
+    gs_info("Missing DB PATH");
     return 0;
   } else {
     strlcpy(server_data.server_db_path, db_path, sizeof(server_data.server_db_path));
@@ -1675,12 +1673,12 @@ int main (int argc, char *argv[]) {
 
   server_data.start_time = get_time_ms();
  
-  gs_info("GAMESERVER%d - Starting game server with TCP-Port: %d UDP-port: %d Master: %s Max Players: %d DB PATH: %s SERVER TYPE: %d",
-	  server_data.game_tcp_port, server_data.game_tcp_port, server_data.game_udp_port, server_data.master, server_data.max_players, server_data.server_db_path, server_data.server_type);
+  gs_info("Starting game server with TCP-Port: %d UDP-port: %d Master: %s Max Players: %d DB PATH: %s SERVER TYPE: %d",
+	  server_data.game_tcp_port, server_data.game_udp_port, server_data.master, server_data.max_players, server_data.server_db_path, server_data.server_type);
   
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
   if (socket_desc == -1) {
-    gs_info("GAMESERVER%d - Could not create socket", server_data.game_tcp_port);
+    gs_info("Could not create socket");
     sqlite3_close(server_data.db);
     return 0;
   }
@@ -1730,14 +1728,14 @@ int main (int argc, char *argv[]) {
     }
     
     if (pthread_create(&thread_id, NULL, gs_gameserver_client_handler, (void*)pl) < 0) {
-      gs_error("GAMESERVER%d - Could not create thread", server_data.game_tcp_port);
+      gs_error("Could not create thread");
       break;
     }
     pthread_detach(thread_id);
   }
 
   if (client_sock < 0)
-    gs_error("GAMESERVER%d - Accept failed", server_data.game_tcp_port);
+    gs_error("Accept failed");
   sqlite3_close(server_data.db);
 
   return 0;

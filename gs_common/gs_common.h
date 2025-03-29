@@ -130,6 +130,8 @@
 #define SYSTEMPAGE 0xB5
 #define FINDSUITABLEGROUP 0xB6
 
+extern char log_tag[128];
+
 void gs_error(const char* format, ... );
 void gs_info(const char* format, ... );
 void print_gs_data(void* pkt,unsigned long pkt_size);

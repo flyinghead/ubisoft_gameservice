@@ -202,7 +202,7 @@ static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
 	int wpipefd = dup(pipefd[1]);
 	sprintf(arg_6, "-i %d", wpipefd);
       }
-      gs_info("Starting GameServer with args %s %s %s %s %s %s %s",
+      gs_info("lobby: Starting GameServer with args %s %s %s %s %s %s %s",
 	      arg_1, arg_2, arg_3, arg_4,
 	      arg_5, arg_6, argc >= 8 ? argv[7] : "");
       execve("gs_gameserver", argv, NULL);
@@ -343,7 +343,7 @@ void *keepalive_server_handler(void *data)
         continue;
       //Time between keepalive should not be more then 5min (300 sec)
       if (now - player->keepalive > 300) {
-          gs_info("[LOBBY] - User %s is not sending keepalive, last was %d s ago",
+          gs_info("lobby: User %s is not sending keepalive, last was %d s ago",
 		  player->username,
 		  (int)(now - player->keepalive));
           /* will make the client thread delete the player and exit */
@@ -387,12 +387,12 @@ void *keepalive_server_handler(void *data)
 	int duration = (int)(now - s->s_l[i]->session_start);
 	/* Remove session that have been active for longer then 60 sec but have 0 members */
 	if (duration > 60 && s->s_l[i]->session_nb_players == 0) {
-	  gs_info("[LOBBY] - Removed empty session %s after 60 sec", s->s_l[i]->session_name);
+	  gs_info("lobby: Removed empty session %s after 60 sec", s->s_l[i]->session_name);
 	  remove_server_session(s, s->s_l[i]);
 	}
 	/* Remove Stale Sessions after 8h */
 	else if (duration > 28800) {
-	  gs_info("[LOBBY] - Removed stale session %s No: [%d]", s->s_l[i]->session_name, s->s_l[i]->session_nb_players);
+	  gs_info("lobby: Removed stale session %s No: [%d]", s->s_l[i]->session_name, s->s_l[i]->session_nb_players);
 	  remove_server_session(s, s->s_l[i]);
 	}
       }
@@ -502,7 +502,7 @@ session_t* find_server_session(server_data_t *s, uint32_t session_id) {
   for (int i = 0; i < s->max_sessions; i++) {
     session_t *sess = s->s_l[i];
     if (sess && sess->session_id == session_id) {
-      gs_info("Found session %s with groupid %d", sess->session_name, sess->session_id);
+      gs_info("lobby: Found session %s with groupid %d", sess->session_name, sess->session_id);
       return sess;
     }
   }
@@ -516,14 +516,13 @@ int add_server_player(server_data_t *s, player_t *pl) {
       s->server_p_l[i] = pl;
       s->group_size = s->group_size + 1;
       pthread_mutex_unlock(&s->mutex);
-      gs_info("Added player with id: 0x%02x", pl->player_id);
+      gs_info("lobby: Added player with id %02x", pl->player_id);
       return 1;
     }
   }
   pthread_mutex_unlock(&s->mutex);
   
-  gs_info("Could not add player with id: 0x%02x", pl->player_id);
-  gs_info("Server full");
+  gs_info("lobby: Could not add player with id %02x: Server full", pl->player_id);
   return 0;
 }
 
@@ -551,13 +550,13 @@ int add_player_to_session(session_t *sess, player_t *pl) {
   if (pl->in_session_id != 0) {
     if (pl->in_session_id == sess->session_id) {
 	/* Already in the session. Not sure how this happens but it does */
-	gs_info("Player %s is already in session %d", sess->session_id);
+	gs_info("lobby: Player %s is already in session %d", sess->session_id);
 	return 1;
     }
     /* Check if session is still active */
     pthread_mutex_lock(&s->mutex);
     if (find_server_session(s, pl->in_session_id) != NULL)  {
-      gs_info("Player %s is trying to join a session %d but is still in %d", pl->username, sess->session_id, pl->in_session_id);
+      gs_info("lobby: Player %s is trying to join a session %d but is still in %d", pl->username, sess->session_id, pl->in_session_id);
       player_cleanup(s, pl);
     }
     pthread_mutex_unlock(&s->mutex);
@@ -566,7 +565,7 @@ int add_player_to_session(session_t *sess, player_t *pl) {
   pthread_mutex_lock(&s->mutex);
   for (int i = 0; i < MAX_PLAYERS; i++) {
      if(!(sess->players[i])) {
-       gs_info("Added player %s to %s", pl->username, sess->session_name);
+       gs_info("lobby: Added player %s to %s", pl->username, sess->session_name);
        sess->session_nb_players = sess->session_nb_players + 1;
        sess->players[i] = pl;
        pl->in_session_id = sess->session_id;
@@ -576,7 +575,7 @@ int add_player_to_session(session_t *sess, player_t *pl) {
   }
   pthread_mutex_unlock(&s->mutex);
 
-  gs_info("Session is full");
+  gs_info("lobby: Session is full");
   return 0;
 }
 
@@ -586,7 +585,7 @@ void remove_player_from_session(session_t *sess, player_t *pl) {
     if (sess->players[i] &&
 	sess->players[i]->player_id == pl->player_id) {
       
-      gs_info("Removed player %s (0x%02x) from %s", pl->username, pl->player_id, sess->session_name);
+      gs_info("lobby: Removed player %s (%02x) from %s", pl->username, pl->player_id, sess->session_name);
       sess->session_nb_players = sess->session_nb_players - 1;
 
       pl->in_session_id = 0;
@@ -612,7 +611,7 @@ void remove_server_session(server_data_t *s, session_t *sess) {
   if (i == max_sessions)
     return;
 
-  gs_info("Removed session %s", sess->session_name);
+  gs_info("lobby: Removed session %s", sess->session_name);
   if (sess->gameserver_pipe != -1) {
       close(sess->gameserver_pipe);
       /* Avoid deadlock with pipe thread */
@@ -634,7 +633,7 @@ int player_cleanup(server_data_t *s, player_t *pl) {
   int hit=0;
   
   if (pl == NULL) {
-    gs_info("Player cleanup with a NULL pointer is bad");
+    gs_info("lobby: Player cleanup with a NULL pointer is bad");
     return 0;
   }
 
@@ -645,14 +644,14 @@ int player_cleanup(server_data_t *s, player_t *pl) {
       if (sess->players[i]
 		&& sess->players[i]->username[0] != '\0'
 		&& strcmp(pl->username, sess->players[i]->username) == 0) {
-	  gs_info("Player %s still in session %d, remove...", pl->username, sess->session_id);
+	  gs_info("lobby: Player %s still in session %d, remove...", pl->username, sess->session_id);
 	  hit = 1;
 	  break;
       }
     }
 
     if (hit == 0) {
-      gs_info("Player struct has in_session_id value but player is not there anymore");
+      gs_info("lobby: Player struct has in_session_id value but player is not there anymore");
       return 0;
     }
     
@@ -663,7 +662,7 @@ int player_cleanup(server_data_t *s, player_t *pl) {
     send_msg_to_session(sess, msg, pkt_size);
 
     if (s->server_type == POD_SERVER && sess->session_id == s->chatgroup_id) {
-      gs_info("Leaving chat..");
+      gs_info("lobby: Leaving chat..");
       return 0;
     }
     
@@ -755,7 +754,7 @@ int add_server_session(server_data_t *s,
   sess->session_unknown_2 = session_unknown_2;
 
   if (sess->session_password[0] != '\0') {
-    gs_info("Session got password %s", sess->session_password);
+    gs_info("lobby: Session got password %s", sess->session_password);
     sess->session_config = PASSWORD_PROTECTED;
   }
   sess->gameserver_pipe = -1;
@@ -774,16 +773,15 @@ int add_server_session(server_data_t *s,
       sess->session_gameport = get_available_gameserver_port(s, sess);
       if (sess->session_gameport == 0) {
 	sess->session_gameport = (uint16_t)(GS_PORT_OFFSET + sess->session_id);
-	gs_error("Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
+	gs_error("lobby: Could not find available gameserver port, set to %d and hope for the best", sess->session_gameport);
       }
       pthread_mutex_unlock(&s->mutex);
-      gs_info("Added session %s with groupid: %d and port: %d", sess->session_name, sess->session_id, sess->session_gameport);
+      gs_info("lobby: Added session %s with groupid: %d and port: %d", sess->session_name, sess->session_id, sess->session_gameport);
       return 1;
     }
   }
   pthread_mutex_unlock(&s->mutex);
-  gs_info("Could not add session %s", sess->session_name);
-  gs_info("No more session available");
+  gs_info("lobby: Could not add session %s: No more session available", sess->session_name);
   return 0;
 }
 
@@ -817,7 +815,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
   buf[buf_len] = '\0';
   //Parse header
   if (buf_len < 6) {
-    gs_info("[lobby] Length of packet is less then 6 bytes...[SKIP]");
+    gs_info("lobby: Length of packet is less then 6 bytes...[SKIP]");
     return 0;
   }
 
@@ -825,7 +823,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
   recv_size = char_to_uint16(&buf[1]);
   
   if(recv_size > buf_len) {
-    gs_info("[lobby] Packet size %d is greater than buffer size %d", recv_size, buf_len);
+    gs_info("lobby: Packet size %d is greater than buffer size %d", recv_size, buf_len);
     print_gs_data(buf, (long unsigned int)buf_len);
     return 0;
   }
@@ -846,7 +844,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     case 'b':
       pos++;
       if (pos + 4 > buf_len) {
-	gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
+	gs_error("lobby: Binary data exceeds buffer %d > %d on nr %d msg_id %x", (pos+4), buf_len, nr_b_parsed, recv_flag);
 	print_gs_data(buf, (long unsigned int)buf_len);
 	return 0;
       }
@@ -854,7 +852,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       if ((uint32_t)(pos + 4) + binLen > buf_len) {
 	if (s->server_type != SDO_SERVER || recv_flag != LEAVESESSION) {
 	  // SDO sends a bogus LEAVESESSION message when quitting a race. Ignore it silently.
-	  gs_error("Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
+	  gs_error("lobby: Binary data exceeds buffer %d > %d on nr %d msg_id %x", (uint32_t)(pos + 4) + binLen, buf_len, nr_b_parsed, recv_flag);
 	  print_gs_data(buf, (long unsigned int)buf_len);
 	}
 	return 0;
@@ -915,7 +913,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
     /* Joining a session */
     if (sess != NULL) {
       if ((sess->session_nb_players + 1) > sess->session_max_players) {
-	gs_info("Session is full");
+	gs_info("lobby: Session is full");
 	/* 27 Session full */
 	pkt_size = create_gsfail(&msg[6], JOINSESSION, 27);
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
@@ -923,7 +921,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
 	return pkt_size;
       }
       if (sess->session_config == SESSION_LOCKED) {
-	gs_info("Session locked");
+	gs_info("lobby: Session locked");
 	/* 30 Session locked  - Not Working */
 	pkt_size = create_gsfail(&msg[6], JOINSESSION, 30);
 	pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
@@ -931,9 +929,9 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
 	return pkt_size;
       }
       if ((sess->session_config & PASSWORD_PROTECTED) == PASSWORD_PROTECTED) {
-	gs_info("Session is password protected");
+	gs_info("lobby: Session is password protected");
 	if ( (strcmp(tok_array[0], sess->session_password)) != 0 ) {
-	  gs_info("Incorrect password");
+	  gs_info("lobby: Incorrect password");
 	  /* 33 Incorrect password */
 	  pkt_size = create_gsfail(&msg[6], JOINSESSION, 33);
 	  pkt_size = create_gs_hdr(msg, GSFAIL, 0x24, pkt_size);
@@ -1120,7 +1118,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
       
       /* If POD Main chat we are done here */
       if (s->server_type == POD_SERVER && sess->session_id == s->chatgroup_id) {
-	gs_info("Leaving chat..");
+	gs_info("lobby: Leaving chat..");
 	pthread_mutex_unlock(&s->mutex);
 	return 0;
       }
@@ -1192,7 +1190,7 @@ ssize_t server_msg_handler(int sock, player_t *pl, char *msg, char *buf, int buf
 	discord_game_created(pl->username, sess->session_name, sess->session_gameinfo);
 #endif
     } else {
-      gs_error("Trying to lock session that doesn't exist");
+      gs_error("lobby: Trying to lock session that doesn't exist");
     }
     pthread_mutex_unlock(&s->mutex);
 
@@ -1290,7 +1288,7 @@ void *gs_server_client_handler(void *data) {
 	  send_gs_msg(sock, s_msg, (uint16_t)write_size);
     }
     if (write_size < 0) {
-      gs_error("Client with socket %d is not following protocol - Disconnecting", sock);
+      gs_error("lobby: Client with socket %d is not following protocol - Disconnecting", sock);
       break;
     }
   }
@@ -1307,7 +1305,7 @@ void *gs_server_handler(void* data) {
 
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
   if (socket_desc == -1) {
-    gs_info("Could not create socket");
+    gs_info("lobby: Could not create socket");
     return 0;
   }
 
@@ -1319,7 +1317,7 @@ void *gs_server_handler(void* data) {
   server.sin_port = htons( s_data->server_port );
   
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0) {
-    gs_error("Bind failed. Error");
+    gs_error("lobby: Bind failed. Error");
     return 0;
   }
   gs_info("Server TCP listener on port: %d", ntohs(server.sin_port));
@@ -1328,7 +1326,7 @@ void *gs_server_handler(void* data) {
   
   pthread_t thread_id_keepalive;
   if( pthread_create( &thread_id_keepalive , NULL ,  keepalive_server_handler , (void*)s_data) < 0) {
-    perror("Could not create keepalive thread");
+    perror("lobby: Could not create keepalive thread");
     return 0;
   }
   pthread_detach(thread_id_keepalive);
@@ -1355,7 +1353,7 @@ void *gs_server_handler(void* data) {
 			    0,
 			    0)) {
       free(sess);
-      gs_error("Could not create POD Chat session");
+      gs_error("lobby: Could not create POD Chat session");
       return 0;
     }
   }
@@ -1375,14 +1373,14 @@ void *gs_server_handler(void* data) {
     }
     
     if( pthread_create( &thread_id , NULL ,  gs_server_client_handler , (void*)pl) < 0) {
-      gs_error("Could not create thread");
+      gs_error("lobby: Could not create thread");
       return 0;
     }
     pthread_detach(thread_id);
   }
   
   if (client_sock < 0) {
-    gs_error("Accept failed");
+    gs_error("lobby: Accept failed");
     return 0;
   }
   

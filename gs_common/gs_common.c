@@ -12,6 +12,8 @@
 #include <math.h>
 #include "gs_common.h"
 
+char log_tag[128];
+
 #ifndef __APPLE__
 
 uint32_t strlcpy(char *dst, const char *src, size_t size) {
@@ -43,40 +45,30 @@ void gs_error(const char* format, ... ) {
   va_list args;
   time_t t = time(NULL);
   struct tm tm = *localtime(&t);
-  char td_str[64];
-  const char* s_str;
   
-  memset(td_str, 0, sizeof(td_str));
-  snprintf(td_str, sizeof(td_str), "[%04d/%02d/%02d %02d:%02d:%02d]", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-  fprintf(stderr,"%s",td_str);
+  fprintf(stderr, "[%02d/%02d %02d:%02d:%02d][ERROR] ", tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
   
-  s_str = "[ERROR] ";
-  
-  fprintf(stderr,"%s",s_str);
-  va_start(args,format);
-  vfprintf(stderr,format,args);
+  if (log_tag[0] != '\0')
+    fprintf(stderr, "%s: ", log_tag);
+  va_start(args, format);
+  vfprintf(stderr, format, args);
   va_end(args);
-  fprintf(stderr,"\n");
+  fputc('\n', stderr);
 }
 
 void gs_info(const char* format, ... ) {
   va_list args;
   time_t t = time(NULL);
   struct tm tm = *localtime(&t);
-  char td_str[64];
-  const char* s_str;
 
-  memset(td_str, 0, sizeof(td_str));
-  snprintf(td_str, sizeof(td_str), "[%04d/%02d/%02d %02d:%02d:%02d]", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-  fprintf(stdout,"%s",td_str);
+  fprintf(stdout, "[%02d/%02d %02d:%02d:%02d][INFO] ", tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-  s_str = "[INFO] ";
-
-  fprintf(stdout,"%s",s_str);
-  va_start(args,format);
-  vfprintf(stdout,format,args);
+  if (log_tag[0] != '\0')
+    fprintf(stdout, "%s: ", log_tag);
+  va_start(args, format);
+  vfprintf(stdout, format, args);
   va_end(args);
-  fprintf(stdout,"\n");
+  fputc('\n', stdout);
   fflush(stdout);
 }
 
