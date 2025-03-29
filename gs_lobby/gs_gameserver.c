@@ -1100,7 +1100,12 @@ ssize_t gameserver_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
       break;
 
     case SDO_DBUPDATE_PLAYERSTAT:
-      update_player_data(s->db, pl->username, (const uint8_t *)&buf[8], 41);
+      if (update_player_data(s->db, pl->username, (const uint8_t *)&buf[8], 41) == -1) {
+	  /* Notify lobby to remove player from session */
+	  lobby_kick_player(s, pl->player_id);
+	  /* Close the client connection */
+	  shutdown(pl->sock, SHUT_RDWR);
+      }
       pkt_size = 0;
       break;
     case SDO_DBUPDATE_PLAYERCAR:

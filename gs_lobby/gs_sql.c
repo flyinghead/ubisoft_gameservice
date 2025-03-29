@@ -729,6 +729,14 @@ int update_player_blob(sqlite3 *db, const char* username, const char *blobname, 
 
 int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, int size)
 {
+  int driving_points = *(int *)&data[0];
+  int cash = *(int *)&data[4];
+  int class = *(int *)&data[12];
+  if (driving_points == 99999999 ||  cash == 99999999) {
+    gs_error("*** Cheating *** User %s: %d points, cash $%d", username, driving_points, cash);
+    return -1;
+  }
+
   char *zSql = "UPDATE PLAYER_DATA SET PLAYERDATA = ?, CLASS = ?, DRIVING_POINTS = ?, CASH = ? WHERE USERNAME = trim(?)";
 
   sqlite3_stmt *pStmt;
@@ -744,9 +752,6 @@ int update_player_data(sqlite3 *db, const char* username, const uint8_t *data, i
     sqlite3_finalize(pStmt);
     return 0;
   }
-  int driving_points = *(int *)&data[0];
-  int cash = *(int *)&data[4];
-  int class = *(int *)&data[12];
 
   rc = sqlite3_bind_int(pStmt, 2, class);
   if (rc != SQLITE_OK) {
