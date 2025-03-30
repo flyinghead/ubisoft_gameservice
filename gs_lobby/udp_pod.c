@@ -82,7 +82,7 @@ int pod_udp_msg_handler(char *buf, size_t size, server_data_t *server, struct so
   pthread_mutex_lock(&server->mutex);
   if ( ( pl = ( get_user_from_addr(server, client))) == NULL )  {
     pthread_mutex_unlock(&server->mutex);
-    gs_info("GAMESERVER%d - Invalid user", server->game_tcp_port);
+    gs_info("Invalid user");
     return 0;
   }
 
@@ -133,7 +133,7 @@ int pod_udp_msg_handler(char *buf, size_t size, server_data_t *server, struct so
 	
       break;
     default:
-      gs_info("GAMESERVER%d - Flag not supported %u", server->game_tcp_port, recv_flag);
+      gs_info("Flag not supported %u", recv_flag);
       print_gs_data(buf, size);
       break;
     }

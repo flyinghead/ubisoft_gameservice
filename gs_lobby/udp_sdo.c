@@ -125,7 +125,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   char msg[MAX_PKT_SIZE];
 
   if (buf_len < 10) {
-    gs_info("GAMESERVER%d - Small UDP msg ignored (%zd bytes)", s->game_tcp_port, buf_len);
+    gs_info("Small UDP msg ignored (%zd bytes)", buf_len);
     return 0;
   }
 
@@ -133,7 +133,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   pthread_mutex_lock(&s->mutex);
   if ((pl = get_user_from_addr(s, client)) == NULL) {
     pthread_mutex_unlock(&s->mutex);
-    gs_info("GAMESERVER%d - Invalid user", s->game_tcp_port);
+    gs_info("Invalid user");
     return 0;
   }
 
@@ -171,7 +171,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
     p += size;
     if (p - buf > buf_len) {
       send_to_players = -1;
-      gs_info("GAMESERVER%d - UDP segment overflow from %s: size %d", s->game_tcp_port, pl->username, size);
+      gs_info("UDP segment overflow from %s: size %d", pl->username, size);
       break;
     }
 
@@ -207,7 +207,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
 	    break;
 
 	  default:
-	    gs_info("GAMESERVER%d - Flag not supported %x", s->game_tcp_port, msg_id);
+	    gs_info("Flag not supported %x", msg_id);
 	    print_gs_data(buf, buf_len);
 	    break;
 	}
@@ -216,7 +216,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
     {
 	if (send_flag != SENDTOOTHERPLAYERS && send_flag != SENDTOALLPLAYERS) {
 	  send_to_players = -1;
-	  gs_info("GAMESERVER%d - Bogus UDP packet ignored from %s: send_flag %x", s->game_tcp_port, pl->username, send_flag);
+	  gs_info("Bogus UDP packet ignored from %s: send_flag %x", pl->username, send_flag);
 	}
 	/* a bit risky
 	else if (msg_id != EVENT_ACK && msg_id != EVENT_CHOKE
@@ -258,14 +258,14 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   for (int i = 0; i < MAX_PLAYERS; i++)
   {
     player_t *player = s->players[i];
-    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 30000) {
+    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 45000) {
       if (player->player_id != 0) {
-	gs_info("GAMESERVER%d - User %s (%d) timed out", s->game_tcp_port, player->username, player->player_id);
+	gs_info("User %s (%d) timed out", player->username, player->player_id);
 	/* Notify lobby to remove player from session */
 	lobby_kick_player(s, player->player_id);
       }
       else {
-	gs_info("GAMESERVER%d - Socket %d timed out", s->game_tcp_port, player->sock);
+	gs_info("Socket %d timed out", player->sock);
       }
       /* Close the client connection */
       shutdown(player->sock, SHUT_RDWR);

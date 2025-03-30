@@ -1,6 +1,6 @@
 CC = gcc
 TARGET = gs_lobby gs_gameserver
-CFLAGS = -Wconversion -Wall -g
+CFLAGS = -Wconversion -Wall -g -O3
 LFLAGS := -lpthread -lsqlite3 -lm -lrt
 DEPS = gs_waitmodule.h gs_lobby.h gs_gameserver.h gs_sql.h ../gs_common/gs_common.h ../gs_common/gs_msg.h Makefile
 COMMON_OBJS := gs_sql.o ../gs_common/gs_common.o ../gs_common/gs_msg.o
