@@ -489,18 +489,18 @@ ssize_t waitmodule_msg_handler(int sock, player_t *pl, char *msg, char *buf, int
     
     break;
   case SCORECARD:
-    if (nr_parsed != 2) {
-      gs_error("Got %d strings from SCORECARD packet needs 2", nr_parsed);
+    if (nr_parsed == 0) {
+      gs_error("SCORECARD packet needs 1 or 2 params");
       return 0;
     }
 
     if (tok_array[0] == NULL)
       return 0;
-    if (tok_array[1] == NULL)
-      return 0;
 
     username = tok_array[0];
     game = tok_array[1];
+    if (game == NULL)
+      game = s->game;
 
     /* User stat lookup for each user */
     pthread_mutex_lock(&s->wm_mutex);
