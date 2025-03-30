@@ -258,7 +258,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   for (int i = 0; i < MAX_PLAYERS; i++)
   {
     player_t *player = s->players[i];
-    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 45000) {
+    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 60000) {
       if (player->player_id != 0) {
 	gs_info("User %s (%d) timed out", player->username, player->player_id);
 	/* Notify lobby to remove player from session */
