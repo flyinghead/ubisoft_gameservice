@@ -20,6 +20,7 @@
  * Game Service Server functions for Dreamcast
  */
 
+#define _GNU_SOURCE
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -29,6 +30,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include "gs_lobby.h"
 #include "gs_waitmodule.h"
 #include "gs_sql.h"
@@ -614,7 +616,7 @@ int main(int argc, char *argv[]) {
   }
   pthread_detach(thread_id_server);
  
-  socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+  socket_desc = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (socket_desc == -1) {
     gs_info("Could not create socket");
     return 1;
@@ -638,7 +640,7 @@ int main(int argc, char *argv[]) {
   pthread_t thread_id;
   c = sizeof(struct sockaddr_in);
   
-  while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
+  while ((client_sock = accept4(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c, SOCK_CLOEXEC)) >= 0) {
     //Store player data
     player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;

@@ -19,7 +19,7 @@
  *
  * Game Service Server functions for Dreamcast
  */
-#define _GNU_SOURCE	/* for pipe2 */
+#define _GNU_SOURCE	/* for pipe2 and accept4 */
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/socket.h>
 #include "gs_lobby.h"
 #include "gs_waitmodule.h"
 #include "../gs_common/gs_common.h"
@@ -241,7 +242,7 @@ static uint16_t icmp_cksum(const uint16_t *addr, int len)
 
 static int icmp_ping(const struct sockaddr_in *addr)
 {
-  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+  int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_ICMP);
   if (sock == -1) {
       if (errno == EPERM || errno == EACCES)
 	gs_error("Can't create ICMP socket: permission denied. Set net.ipv4.ping_group_range correctly.");
@@ -1303,7 +1304,7 @@ void *gs_server_handler(void* data) {
   int socket_desc , client_sock , c, optval;
   struct sockaddr_in server = { 0 }, client = { 0 };
 
-  socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+  socket_desc = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (socket_desc == -1) {
     gs_info("lobby: Could not create socket");
     return 0;
@@ -1358,7 +1359,7 @@ void *gs_server_handler(void* data) {
     }
   }
   
-  while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) ) {
+  while ((client_sock = accept4(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c, SOCK_CLOEXEC)) >= 0) {
     //Store player data
     player_t *pl = (player_t *)calloc(1, sizeof(player_t));
     pl->addr = client;

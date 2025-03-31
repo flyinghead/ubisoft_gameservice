@@ -166,14 +166,14 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
   while (p - buf < buf_len)
   {
     int size = *p & 0xff;
+    if (size < 4 || p + size > buf + buf_len) {
+	send_to_players = -1;
+	gs_info("UDP segment over/underflow from %s: size %d", pl->username, size);
+	break;
+    }
     uint8_t msg_id = (uint8_t)(p[3] & 0xff);
     int send_flag = p[1] & 0xf;
     p += size;
-    if (p - buf > buf_len) {
-      send_to_players = -1;
-      gs_info("UDP segment overflow from %s: size %d", pl->username, size);
-      break;
-    }
 
     if (send_flag == SENDTOSERVER)
     {
