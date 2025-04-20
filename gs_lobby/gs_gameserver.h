@@ -122,7 +122,8 @@ struct player_data {
   int sock;
   int is_master;
   struct {
-    int ready;
+    char ready;
+    char in_race;
     uint32_t client_seq;
     uint32_t rel_client_seq;
     uint32_t last_ack_seq;

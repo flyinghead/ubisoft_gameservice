@@ -551,7 +551,7 @@ int add_player_to_session(session_t *sess, player_t *pl) {
   if (pl->in_session_id != 0) {
     if (pl->in_session_id == sess->session_id) {
 	/* Already in the session. Not sure how this happens but it does */
-	gs_info("lobby: Player %s is already in session %d", sess->session_id);
+	gs_info("lobby: Player %s is already in session %d", pl->username, sess->session_id);
 	return 1;
     }
     /* Check if session is still active */

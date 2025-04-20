@@ -156,6 +156,11 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
       pl->udp.last_ack_seq &= RUDP_MASK;
       pl->udp.last_rel_ack_seq = pl->udp.last_ack_seq;
   }
+  if (pl->udp.in_race && pl->udp.last_update != 0
+      && now - pl->udp.last_update >= 6000) {
+    gs_info("User %s (%d) near timeout: %d ms", pl->username, pl->player_id,
+	      (int)(now - pl->udp.last_update));
+  }
   pl->udp.last_time = char_to_uint16(&buf[6]);
   pl->udp.last_update = now;
 
@@ -218,16 +223,11 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
 	  send_to_players = -1;
 	  gs_info("Bogus UDP packet ignored from %s: send_flag %x", pl->username, send_flag);
 	}
-	/* a bit risky
-	else if (msg_id != EVENT_ACK && msg_id != EVENT_CHOKE
-	    && msg_id != EVENT_RATE && msg_id != EVENT_UDPCONNECT
-	    && msg_id != SDO_PLAYER_STATE && msg_id != SDO_GAME_EVENT
-	    && msg_id != SDO_DUMMY && msg_id != STILLALIVE) {
-	  send_to_players = -1;
-	  gs_info("GAMESERVER%d - Bogus UDP packet ignored from %s: msg_id %x", pl->username, msg_id);
-	}
-	*/
 	else {
+	  if (msg_id == STILLALIVE)
+	    pl->udp.in_race = 0;
+	  else if (msg_id == SDO_PLAYER_STATE || msg_id == SDO_GAME_EVENT)
+	    pl->udp.in_race = 1;
 	  send_to_players = send_flag;
 	}
     }
@@ -252,15 +252,31 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
       uint24_to_char(serverSeq | reliable, &buf[0]);
       serverSeq++;
       uint16_to_char((uint16_t)get_time_ms(), &buf[6]);
-      send_udp_functions(send_to_players, buf, (uint16_t)buf_len, s, pl->player_id);
+      if (s->current_nr_of_players > 1) {
+        send_udp_functions(send_to_players, buf, (uint16_t)buf_len, s, pl->player_id);
+      }
+      else {
+	/* acknowledge reliable udp packets if only one player remains */
+	buf[0] &= ~0x80;
+	uint24_to_char(pl->udp.rel_client_seq, &buf[3]);
+	buf[3] |= 0x80;
+	sendto(s->udp_sock, buf, 10, 0,
+	       (struct sockaddr*)&pl->udp.addr,
+	       (socklen_t)sizeof(struct sockaddr_in));
+      }
   }
   /* Handle timeouts */
   for (int i = 0; i < MAX_PLAYERS; i++)
   {
     player_t *player = s->players[i];
-    if (player && player->udp.last_update != 0 && (now - player->udp.last_update) >= 60000) {
+    if (player == NULL)
+      continue;
+    const time_t timeout = player->udp.in_race ? 10000 : 60000;
+    if (player->udp.last_update != 0 && now - player->udp.last_update >= timeout)
+    {
       if (player->player_id != 0) {
-	gs_info("User %s (%d) timed out", player->username, player->player_id);
+	gs_info("User %s (%d) timed out: %d >= %d", player->username, player->player_id,
+		(int)(now - player->udp.last_update), (int)timeout);
 	/* Notify lobby to remove player from session */
 	lobby_kick_player(s, player->player_id);
       }
