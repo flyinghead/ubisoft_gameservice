@@ -64,6 +64,7 @@ struct server_data {
   uint16_t server_port;
   
   uint8_t server_type;
+  uint8_t dump_game_data;
   uint32_t arena_id;
   uint32_t basicgroup_id;
   uint32_t chatgroup_id;

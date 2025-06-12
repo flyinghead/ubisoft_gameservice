@@ -35,8 +35,8 @@
 #include "gs_sql.h"
 #include "../gs_common/gs_common.h"
 
-server_data_t server_data;
-FILE *udp_dump;
+static server_data_t server_data;
+static FILE *udp_dump;
 
 void send_functions(uint8_t send_flag, char* msg, uint16_t pkt_size, server_data_t *s, uint16_t player_id) {
   int i;

@@ -80,6 +80,7 @@ int get_server_config(server_data_t *s, char *fn) {
   int max_sessions = 0, max_players = 0;
   char server_ip[16], server_db_path[256], buf[1024], server_name[32];
   char discord_url[128];
+  int dump_game_data = 0;
   
   memset(buf, 0, sizeof(buf));
   memset(server_ip, 0, sizeof(server_ip));
@@ -101,6 +102,7 @@ int get_server_config(server_data_t *s, char *fn) {
       sscanf(buf, "SERVER_DB_PATH=%s", server_db_path);
       sscanf(buf, "SERVER_NAME=%31s", server_name);
       sscanf(buf, "DISCORD_URL=%s", discord_url);
+      sscanf(buf, "DUMP_GAME_DATA=%d", &dump_game_data);
     }
     fclose(file);
   } else {
@@ -166,6 +168,7 @@ int get_server_config(server_data_t *s, char *fn) {
   s->start_session_id = (uint32_t)start_session_id;
   s->max_players = (uint16_t)max_players;
   s->max_sessions = (uint16_t)max_sessions;
+  s->dump_game_data = (uint8_t)dump_game_data;
   
   if (s->server_type == POD_SERVER) {
     strcpy(s->game, "POD2DC");
@@ -199,6 +202,8 @@ int get_server_config(server_data_t *s, char *fn) {
   gs_info("\tSERVER_DB_PATH: %s", s->server_db_path);
   if (s->name[0] != '\0')
     gs_info("\tSERVER_NAME: %s", s->name);
+  if (s->dump_game_data != 0)
+    gs_info("\tDumping game data");
 
   return 1;
 }

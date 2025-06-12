@@ -190,7 +190,8 @@ static void safe_fork_gameserver(server_data_t* s, session_t *sess) {
   arg_6[0] = '\0';
   char *argv[] = { "gs_gameserver", arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, NULL, NULL };
   int argc = 6 + (pipefd[0] != -1);
-  if (!strcmp("SDODC", sess->session_game))
+  if (s->dump_game_data != 0
+      && (s->server_type != SDO_SERVER || !strcmp("SDODC", sess->session_game)))
     /* dump received data */
     argv[argc++] = "-v";
 
