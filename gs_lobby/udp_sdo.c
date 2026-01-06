@@ -157,7 +157,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
       pl->udp.last_rel_ack_seq = pl->udp.last_ack_seq;
   }
   if (pl->udp.in_race && pl->udp.last_update != 0
-      && now - pl->udp.last_update >= 6000) {
+      && now - pl->udp.last_update >= 10000) {
     gs_info("User %s (%d) near timeout: %d ms", pl->username, pl->player_id,
 	      (int)(now - pl->udp.last_update));
   }
@@ -257,9 +257,10 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
       }
       else {
 	/* acknowledge reliable udp packets if only one player remains */
-	buf[0] &= ~0x80;
+	  // TODO send ACK payload SENDTOALLPLAYERS?
+	buf[0] &= (char)~0x80;
 	uint24_to_char(pl->udp.rel_client_seq, &buf[3]);
-	buf[3] |= 0x80;
+	buf[3] |= (char)0x80;
 	sendto(s->udp_sock, buf, 10, 0,
 	       (struct sockaddr*)&pl->udp.addr,
 	       (socklen_t)sizeof(struct sockaddr_in));
@@ -271,7 +272,7 @@ int sdo_udp_msg_handler(char* buf, size_t buf_len, server_data_t *s, struct sock
     player_t *player = s->players[i];
     if (player == NULL)
       continue;
-    const time_t timeout = player->udp.in_race ? 10000 : 60000;
+    const time_t timeout = player->udp.in_race ? 15000 : 90000;
     if (player->udp.last_update != 0 && now - player->udp.last_update >= timeout)
     {
       if (player->player_id != 0) {
